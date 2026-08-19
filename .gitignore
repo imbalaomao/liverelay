@@ -1,0 +1,14 @@
+# 数据与二进制（用户运行时产生，或体积过大）
+data/
+tools/
+recordings/
+logs/
+cache/
+*.exe
+*.log
+# 构建产物
+build/
+/dist/
+# 编辑器
+.idea/
+.vscode/
