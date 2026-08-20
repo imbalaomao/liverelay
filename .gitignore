@@ -29,3 +29,11 @@ frontend/package.json.md5
 
 # 验证脚本产生的截图
 build/screenshot-*.png
+
+# 机密：微博 cookie 等凭据放在这里，绝不能进仓库
+.env
+.env.*
+!.env.example
+
+# 过程资料（设计与执行账本），不进公开仓库
+.superpowers/

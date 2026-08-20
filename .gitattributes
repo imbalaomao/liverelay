@@ -1,0 +1,38 @@
+# 行尾规范：仓库内一律存 LF，检出时也保持 LF。
+#
+# 不这么做的话，Windows 上 Git 默认会把 LF 换成 CRLF 检出、提交时再换回去，
+# 于是「本地文件」和「仓库里的文件」逐字节不同——换台机器或换个人克隆，
+# diff 会莫名其妙整片飘红，gofmt 之类的工具也可能因为行尾判定不一致而反复改动。
+# 统一成 LF 是当前主流做法，Go、Node、PowerShell 7 在 Windows 上都能正常处理。
+* text=auto eol=lf
+
+# 这几类必须是 CRLF：Windows 的批处理解释器对 LF 行尾的支持不可靠
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# PowerShell 脚本保持 CRLF：Windows PowerShell 5.1 对 LF 脚本的解析在
+# 含 here-string 时有过问题，而这些脚本本来就只在 Windows 上跑
+*.ps1 text eol=crlf
+
+# 二进制文件不要做任何行尾转换，否则会被损坏
+*.png binary
+*.ico binary
+*.icns binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.otf binary
+*.exe binary
+*.dll binary
+*.zip binary
+*.gz binary
+*.pdf binary
+*.psd binary
+
+# 让 GitHub 的语言统计忽略生成物与依赖，仓库首页才会显示成 Go 项目
+frontend/wailsjs/** linguist-generated=true
+frontend/dist/** linguist-generated=true
