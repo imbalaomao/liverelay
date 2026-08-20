@@ -3,12 +3,14 @@ package pipeline
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
+	"unicode/utf8"
 
 	"github.com/imbalaomao/liverelay/internal/config"
 	"github.com/imbalaomao/liverelay/internal/core"
@@ -97,9 +99,13 @@ func (w *limitWriter) String() string {
 func tail(w *limitWriter) string {
 	s := w.String()
 	if len(s) > 200 {
-		return s[len(s)-200:]
+		s = s[len(s)-200:]
+		// 按字节截断可能切在多字节字符中间，丢掉开头的残字节保证合法 UTF-8
+		for len(s) > 0 && !utf8.RuneStart(s[0]) {
+			s = s[1:]
+		}
 	}
-	return s
+	return strings.TrimSpace(s)
 }
 
 // Runner 实现 core.Runner：抓流进程 stdout 直通 ffmpeg stdin（OS 管道，零 Go 堆拷贝）。
@@ -145,22 +151,40 @@ func (r *Runner) Start(ctx context.Context) error {
 		return fmt.Errorf("启动 ffmpeg: %w", err)
 	}
 	if err := r.fetch.Start(); err != nil {
+		// 必须 Kill + Wait 双管齐下：只 Kill 会留下未回收的子进程和
+		// CommandContext 内部的 watch goroutine（资源红线）。
 		_ = r.ff.Process.Kill()
+		_ = r.ff.Wait()
+		r.ff, r.fetch = nil, nil
 		return fmt.Errorf("启动抓流工具: %w", err)
 	}
 	return nil
 }
 
-func (r *Runner) Wait() core.ExitInfo {
-	ferr := r.fetch.Wait()
-	fferr := r.ff.Wait()
-	if ferr == nil && fferr == nil {
+// exitInfo 把两个子进程的退出状态合成一条结论。
+// ffmpeg 先死（如推流密钥错误）会连带写崩抓流进程，两者同时报错——
+// 此时必须暴露 ffmpeg 的原因，否则用户只看到"抓流进程异常退出"而无从排查。
+func (r *Runner) exitInfo(ferr, fferr error) core.ExitInfo {
+	switch {
+	case ferr == nil && fferr == nil:
 		return core.ExitInfo{Normal: true}
-	}
-	if ferr != nil {
+	case fferr != nil && ferr != nil:
+		return core.ExitInfo{Err: fmt.Errorf("ffmpeg 异常退出: %v (%s)；抓流进程随之退出: %v (%s)",
+			fferr, tail(r.ffLog), ferr, tail(r.fetchLog))}
+	case fferr != nil:
+		return core.ExitInfo{Err: fmt.Errorf("ffmpeg 异常退出: %v (%s)", fferr, tail(r.ffLog))}
+	default:
 		return core.ExitInfo{Err: fmt.Errorf("抓流进程异常退出: %v (%s)", ferr, tail(r.fetchLog))}
 	}
-	return core.ExitInfo{Err: fmt.Errorf("ffmpeg 异常退出: %v (%s)", fferr, tail(r.ffLog))}
+}
+
+func (r *Runner) Wait() core.ExitInfo {
+	if r.fetch == nil || r.ff == nil {
+		return core.ExitInfo{Err: errors.New("管道尚未启动")}
+	}
+	ferr := r.fetch.Wait()
+	fferr := r.ff.Wait()
+	return r.exitInfo(ferr, fferr)
 }
 
 func (r *Runner) Stop() error {

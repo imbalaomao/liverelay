@@ -73,3 +73,33 @@ func TestEffectivePath(t *testing.T) {
 		t.Fatal("默认路径未生效")
 	}
 }
+
+// 并发上限与探测间隔必须双向钳制：上限失控会导致数十个 ffmpeg 同时运行，
+// 直接违反资源红线；探测间隔过小会高频请求直播平台。
+func TestParseClampsSettings(t *testing.T) {
+	cases := []struct {
+		name                 string
+		json                 string
+		wantMax, wantProbeIS int
+	}{
+		{"零值取默认", `{"settings":{"maxConcurrent":0,"probeIntervalSec":0}}`, 4, 60},
+		{"负值取默认", `{"settings":{"maxConcurrent":-3,"probeIntervalSec":-1}}`, 4, 60},
+		{"超上限被钳制", `{"settings":{"maxConcurrent":9999,"probeIntervalSec":86400}}`, 16, 300},
+		{"合法值保留", `{"settings":{"maxConcurrent":8,"probeIntervalSec":120}}`, 8, 120},
+		{"边界值保留", `{"settings":{"maxConcurrent":16,"probeIntervalSec":30}}`, 16, 30},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c, err := parse([]byte(tc.json))
+			if err != nil {
+				t.Fatalf("parse: %v", err)
+			}
+			if c.Settings.MaxConcurrent != tc.wantMax {
+				t.Errorf("MaxConcurrent = %d，期望 %d", c.Settings.MaxConcurrent, tc.wantMax)
+			}
+			if c.Settings.ProbeIntervalSec != tc.wantProbeIS {
+				t.Errorf("ProbeIntervalSec = %d，期望 %d", c.Settings.ProbeIntervalSec, tc.wantProbeIS)
+			}
+		})
+	}
+}

@@ -1,9 +1,11 @@
 package pipeline
 
 import (
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/imbalaomao/liverelay/internal/config"
 )
@@ -86,5 +88,58 @@ func TestBuildFetchArgsCustomOnly(t *testing.T) {
 	want = []string{"https://x/1", "best", "-O", "--foo", "a b"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("自定义参数未逐字追加: %v", got)
+	}
+}
+
+// 未 Start 就 Wait 不得 panic（Runner 是导出类型，调用顺序不受本包控制）。
+func TestWaitBeforeStartReturnsError(t *testing.T) {
+	info := NewRunner(baseOpts()).Wait()
+	if info.Normal || info.Err == nil {
+		t.Fatalf("未启动时 Wait 应返回错误，得到 %+v", info)
+	}
+}
+
+func TestStopBeforeStartIsSafe(t *testing.T) {
+	if err := NewRunner(baseOpts()).Stop(); err != nil {
+		t.Fatalf("未启动时 Stop 应无副作用，得到 %v", err)
+	}
+}
+
+// ffmpeg 先死（如推流密钥错误）会连带把抓流进程写崩，两个进程同时报错。
+// 此时必须暴露 ffmpeg 的真实原因，否则用户只看到"抓流进程异常退出"而无从排查。
+func TestExitInfoSurfacesFFmpegCauseWhenBothFail(t *testing.T) {
+	r := &Runner{
+		fetchLog: &limitWriter{max: 1024},
+		ffLog:    &limitWriter{max: 1024},
+	}
+	r.fetchLog.Write([]byte("broken pipe"))
+	r.ffLog.Write([]byte("RTMP_Connect0, failed to connect socket"))
+
+	info := r.exitInfo(errors.New("exit status 1"), errors.New("exit status 1"))
+	if info.Normal {
+		t.Fatal("双进程报错时不应判为正常结束")
+	}
+	if !strings.Contains(info.Err.Error(), "RTMP_Connect0") {
+		t.Fatalf("错误信息应包含 ffmpeg 真实原因，得到: %v", info.Err)
+	}
+}
+
+func TestExitInfoNormalWhenBothClean(t *testing.T) {
+	r := &Runner{fetchLog: &limitWriter{max: 1024}, ffLog: &limitWriter{max: 1024}}
+	if info := r.exitInfo(nil, nil); !info.Normal {
+		t.Fatalf("双进程正常退出应判为 Normal，得到 %+v", info)
+	}
+}
+
+// tail 按字节截断会切坏多字节字符，错误信息在 UI 上显示为乱码首字符。
+func TestTailKeepsValidUTF8(t *testing.T) {
+	w := &limitWriter{max: 64 * 1024}
+	w.Write([]byte(strings.Repeat("中文错误信息", 100)))
+	got := tail(w)
+	if !utf8.ValidString(got) {
+		t.Fatalf("tail 输出不是合法 UTF-8: %q", got)
+	}
+	if len(got) > 200 {
+		t.Fatalf("tail 输出应不超过 200 字节，得到 %d", len(got))
 	}
 }

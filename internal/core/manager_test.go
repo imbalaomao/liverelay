@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -112,11 +113,13 @@ func TestManagerNormalLifecycle(t *testing.T) {
 type eventLog struct {
 	mu     sync.Mutex
 	states []State
+	msgs   []string
 }
 
 func (e *eventLog) record(ev Event) {
 	e.mu.Lock()
 	e.states = append(e.states, ev.State)
+	e.msgs = append(e.msgs, ev.Msg)
 	e.mu.Unlock()
 }
 
@@ -191,5 +194,112 @@ func TestManagerStartMissingTask(t *testing.T) {
 	m := NewManager(testCfg(1), (&fakeFactory{}).make, nil)
 	if err := m.Start("ghost"); err == nil {
 		t.Fatal("启动不存在的任务应报错")
+	}
+}
+
+func (e *eventLog) msgsFor(want State) []string {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	var out []string
+	for i, s := range e.states {
+		if s == want {
+			out = append(out, e.msgs[i])
+		}
+	}
+	return out
+}
+
+func (e *eventLog) waitMsgCount(t *testing.T, want State, n int) []string {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if m := e.msgsFor(want); len(m) >= n {
+			return m
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("等待 %d 条 %s 事件超时，实得 %v", n, want, e.msgsFor(want))
+	return nil
+}
+
+// 稳定推流数小时后再断流，应从最小退避重新起步，而不是延用上一轮升到的高值
+// （规格 §4.4「2s 起步」）。退避值写入事件消息，测试对消息断言，避免计时抖动。
+func TestManagerBackoffResetsAfterStableRun(t *testing.T) {
+	ff := &fakeFactory{}
+	log := &eventLog{}
+	m := NewManager(testCfg(2, "a"), ff.make, log.record)
+	m.newBackoff = func() *Backoff {
+		return &Backoff{Min: 10 * time.Millisecond, Max: 80 * time.Millisecond}
+	}
+	m.stableAfter = 20 * time.Millisecond
+	if err := m.Start("a"); err != nil {
+		t.Fatal(err)
+	}
+
+	// 第一轮：瞬间失败（未达稳定阈值）→ 退避 = Min
+	ff.waitN(t, 1)
+	<-ff.get(0).started
+	ff.get(0).exit <- ExitInfo{Err: errors.New("断流")}
+	log.waitMsgCount(t, StateReconnecting, 1)
+
+	// 第二轮：稳定运行超过阈值后失败 → 退避应被重置回 Min
+	ff.waitN(t, 2)
+	<-ff.get(1).started
+	time.Sleep(40 * time.Millisecond)
+	ff.get(1).exit <- ExitInfo{Err: errors.New("再次断流")}
+	msgs := log.waitMsgCount(t, StateReconnecting, 2)
+
+	for i, want := range []string{"10ms", "10ms"} {
+		if !strings.Contains(msgs[i], want) {
+			t.Fatalf("第 %d 次重连退避应为 %s，实际消息: %q", i+1, want, msgs[i])
+		}
+	}
+}
+
+// Start 必须在持锁状态下同步占位。否则 Start 返回后到 supervise 真正跑起来
+// 之间状态仍是 idle，此窗口内的第二次 Start 会为同一任务拉起第二条管道，
+// 且 cancels/runners 被覆盖后其中一条永远无法停止（孤儿 ffmpeg 持续占用资源）。
+func TestManagerDoubleStartRejected(t *testing.T) {
+	ff := &fakeFactory{}
+	m := NewManager(testCfg(2, "a"), ff.make, nil)
+	if err := m.Start("a"); err != nil {
+		t.Fatal(err)
+	}
+	if s := m.State("a"); s == StateIdle {
+		t.Fatal("Start 返回后状态仍为 idle：占位未同步完成")
+	}
+	if err := m.Start("a"); err == nil {
+		t.Fatal("重复启动应被拒绝")
+	}
+	ff.waitN(t, 1)
+	<-ff.get(0).started
+	waitState(t, m, "a", StateRunning)
+	ff.mu.Lock()
+	n := len(ff.fakes)
+	ff.mu.Unlock()
+	if n != 1 {
+		t.Fatalf("同一任务应只创建 1 个 runner，实得 %d", n)
+	}
+}
+
+// 停止后立即重启：旧 supervise 尚在收尾时新一轮已注册，
+// 旧协程的清理不得把新一轮的句柄删掉，否则新任务变成停不掉的孤儿。
+func TestManagerStopThenRestartKeepsNewRunControllable(t *testing.T) {
+	ff := &fakeFactory{}
+	m := NewManager(testCfg(2, "a"), ff.make, nil)
+	for round := 0; round < 3; round++ {
+		if err := m.Start("a"); err != nil {
+			t.Fatalf("第 %d 轮启动: %v", round, err)
+		}
+		ff.waitN(t, round+1)
+		<-ff.get(round).started
+		waitState(t, m, "a", StateRunning)
+		if err := m.Stop("a"); err != nil {
+			t.Fatalf("第 %d 轮停止: %v", round, err)
+		}
+		waitState(t, m, "a", StateIdle)
+	}
+	if got := m.Running(); got != 0 {
+		t.Fatalf("全部停止后运行计数应归零，实得 %d", got)
 	}
 }

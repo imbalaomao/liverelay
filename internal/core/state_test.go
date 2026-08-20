@@ -43,3 +43,23 @@ func TestBackoffProgression(t *testing.T) {
 		}
 	}
 }
+
+func TestTransitionRejectsIllegal(t *testing.T) {
+	got, err := Transition(StateIdle, StateRunning)
+	if err == nil {
+		t.Fatal("idle → running 应被拒绝")
+	}
+	if got != StateIdle {
+		t.Fatalf("被拒绝时应保持原状态 idle，得到 %s", got)
+	}
+}
+
+func TestTransitionAcceptsLegal(t *testing.T) {
+	got, err := Transition(StateQueued, StateStarting)
+	if err != nil {
+		t.Fatalf("queued → starting 应被接受: %v", err)
+	}
+	if got != StateStarting {
+		t.Fatalf("应迁移到 starting，得到 %s", got)
+	}
+}
