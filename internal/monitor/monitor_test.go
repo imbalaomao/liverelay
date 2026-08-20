@@ -371,3 +371,61 @@ func TestRunStopsOnContextCancel(t *testing.T) {
 	}
 	s.Wait()
 }
+
+// ---------- 配置热替换 ----------
+
+func TestSetConfigIsRaceFreeDuringSweep(t *testing.T) {
+	// 探测循环在后台读 cfg.Tasks，用户同时可能在界面上增删任务
+	s, _, _ := testService(t, unattended("a", "b"), alwaysOffline)
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := 0; i < 200; i++ {
+			cfg := config.Default()
+			cfg.Tasks = unattended("a", "b", "c")
+			cfg.Settings.ProbeIntervalSec = 30 + i%200
+			s.SetConfig(cfg)
+		}
+	}()
+	for i := 0; i < 200; i++ {
+		s.sweep(context.Background())
+	}
+	<-done
+	s.Wait()
+}
+
+func TestSetConfigTakesEffect(t *testing.T) {
+	s, st, _ := testService(t, unattended("a"), alwaysLive)
+
+	cfg := config.Default()
+	cfg.Tasks = unattended("a", "新任务")
+	cfg.Settings.ProbeIntervalSec = 60
+	s.SetConfig(cfg)
+
+	// 全部立即到期，避免错峰把新任务推到下一轮
+	for _, id := range []string{"a", "新任务"} {
+		s.due[id] = s.now().Add(-time.Minute)
+	}
+	s.sweep(context.Background())
+	s.Wait()
+
+	found := false
+	for _, id := range st.startedIDs() {
+		if id == "新任务" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("热替换配置后新任务应被纳入探测，实际启动了 %v", st.startedIDs())
+	}
+}
+
+func TestSetConfigIgnoresNil(t *testing.T) {
+	s, _, _ := testService(t, unattended("a"), alwaysOffline)
+	s.SetConfig(nil)
+	if n := s.sweep(context.Background()); n != 1 {
+		t.Errorf("传 nil 不应破坏已有配置，实际发起 %d 个探测", n)
+	}
+	s.Wait()
+}

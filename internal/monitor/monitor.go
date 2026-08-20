@@ -87,10 +87,28 @@ func (s *Service) Run(ctx context.Context) {
 // Wait 等待所有在途探测收尾。退出流程必须调用，否则会留下游离的子进程。
 func (s *Service) Wait() { s.wg.Wait() }
 
+// SetConfig 热替换配置。探测循环在后台读 cfg，绑定层同时可能在增删任务，
+// 不加保护就是数据竞争。传 nil 是空操作。
+func (s *Service) SetConfig(cfg *config.Config) {
+	if cfg == nil {
+		return
+	}
+	s.mu.Lock()
+	s.cfg = cfg
+	s.mu.Unlock()
+}
+
+// config 取当前配置快照。
+func (s *Service) config() *config.Config {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.cfg
+}
+
 // interval 取配置的探测间隔。config.parse 已经钳制过范围，
 // 这里再兜一次底：配置结构体可能是调用方直接构造的。
 func (s *Service) interval() time.Duration {
-	n := s.cfg.Settings.ProbeIntervalSec
+	n := s.config().Settings.ProbeIntervalSec
 	if n < 30 {
 		n = 60
 	}
@@ -146,7 +164,7 @@ func (s *Service) sweep(ctx context.Context) int {
 // eligible 挑出该探测的任务：开了无人值守，且当前没在跑。
 func (s *Service) eligible() []config.Task {
 	var out []config.Task
-	for _, t := range s.cfg.Tasks {
+	for _, t := range s.config().Tasks {
 		if !t.Unattended {
 			continue
 		}
@@ -161,14 +179,17 @@ func (s *Service) eligible() []config.Task {
 func (s *Service) runProbe(ctx context.Context, t config.Task) {
 	defer s.wg.Done()
 	defer func() {
+		// interval() 自己要拿 s.mu，必须在进临界区之前算好——
+		// Go 的 Mutex 不可重入，在持锁状态下调用它会当场死锁
+		next := s.now().Add(s.interval())
 		s.mu.Lock()
 		delete(s.inflight, t.ID)
-		s.due[t.ID] = s.now().Add(s.interval())
+		s.due[t.ID] = next
 		s.mu.Unlock()
 		<-s.sem
 	}()
 
-	tool, ok := tools.Find(s.cfg, t.ToolID)
+	tool, ok := tools.Find(s.config(), t.ToolID)
 	if !ok {
 		s.report(t.ID, fmt.Sprintf("内核 %s 不存在，无法探测开播", t.ToolID))
 		return

@@ -468,3 +468,58 @@ func TestNilPrepareIsFine(t *testing.T) {
 	_ = m.Stop("a")
 	waitState(t, m, "a", StateIdle)
 }
+
+// ---------- 配置热替换 ----------
+
+func TestSetConfigIsRaceFreeWhileRunning(t *testing.T) {
+	// 用户完全可能在有任务推流时去编辑另一个任务。Manager 与绑定层共用
+	// 同一份配置，不加保护就是实打实的数据竞争——-race 下必然报。
+	ff := &fakeFactory{}
+	m := NewManager(testCfg(2, "a"), ff.make, nil)
+	if err := m.Start("a"); err != nil {
+		t.Fatal(err)
+	}
+	waitState(t, m, "a", StateRunning)
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := 0; i < 200; i++ {
+			m.SetConfig(testCfg(2, "a", "b"))
+		}
+	}()
+	for i := 0; i < 200; i++ {
+		m.State("a")
+		m.Running()
+		_ = m.Start("b") // 反复读 cfg.Tasks
+	}
+	<-done
+
+	_ = m.Stop("a")
+	_ = m.Stop("b")
+}
+
+func TestSetConfigTakesEffect(t *testing.T) {
+	ff := &fakeFactory{}
+	m := NewManager(testCfg(2, "a"), ff.make, nil)
+	if err := m.Start("新任务"); err == nil {
+		t.Fatal("配置里还没有这个任务，应当启动失败")
+	}
+
+	m.SetConfig(testCfg(2, "a", "新任务"))
+	if err := m.Start("新任务"); err != nil {
+		t.Fatalf("热替换配置后应能启动新任务: %v", err)
+	}
+	waitState(t, m, "新任务", StateRunning)
+	_ = m.Stop("新任务")
+}
+
+func TestSetConfigIgnoresNil(t *testing.T) {
+	ff := &fakeFactory{}
+	m := NewManager(testCfg(2, "a"), ff.make, nil)
+	m.SetConfig(nil) // 传 nil 把配置清掉只会让后续操作崩在空指针上
+	if err := m.Start("a"); err != nil {
+		t.Errorf("传 nil 不应破坏已有配置: %v", err)
+	}
+	_ = m.Stop("a")
+}

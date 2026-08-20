@@ -104,7 +104,25 @@ func (m *Manager) transition(id string, to State, msg string) {
 	m.emit(id, next, msg)
 }
 
+// SetConfig 热替换配置。用户可能在有任务推流时去改另一个任务，
+// 绑定层与 Manager 共用同一份配置，不加保护就是实打实的数据竞争。
+// 传 nil 是空操作——把配置清掉只会让后续操作崩在空指针上。
+func (m *Manager) SetConfig(c *config.Config) {
+	if c == nil {
+		return
+	}
+	m.mu.Lock()
+	m.cfg = c
+	m.mu.Unlock()
+}
+
 func (m *Manager) findTask(id string) (config.Task, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.findTaskLocked(id)
+}
+
+func (m *Manager) findTaskLocked(id string) (config.Task, bool) {
 	for _, t := range m.cfg.Tasks {
 		if t.ID == id {
 			return t, true
@@ -113,6 +131,7 @@ func (m *Manager) findTask(id string) (config.Task, bool) {
 	return config.Task{}, false
 }
 
+// maxConcurrent 必须在持锁状态下调用。
 func (m *Manager) maxConcurrent() int {
 	n := m.cfg.Settings.MaxConcurrent
 	if n <= 0 {
