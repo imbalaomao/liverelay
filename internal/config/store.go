@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"strings"
 )
 
 // MaxConcurrentCap 是全局并发推流上限的硬上界（规格 §4.5：可配 1–16）。
@@ -17,6 +18,9 @@ func Default() *Config {
 		Settings: Settings{
 			MaxConcurrent: 4, CloseToTray: true, PreventSleep: true,
 			Theme: "dark", ProbeIntervalSec: 60,
+			// 类型给个有效默认值：留空会让设置页的下拉框选不中任何一项，
+			// 看起来像是界面坏了
+			Proxy: ProxySettings{Type: "http"},
 		},
 		Tools: []Tool{
 			// streamlink 的便携版是"整个目录"而不是单个 exe：exe 依赖同目录下的
@@ -78,6 +82,14 @@ func parse(data []byte) (*Config, error) {
 	}
 	if c.Settings.ProbeIntervalSec > 300 {
 		c.Settings.ProbeIntervalSec = 300
+	}
+	// 归一化代理类型：老配置里可能是空的或大小写不一致，
+	// 设置页的下拉框只认这两个值，对不上就会显示成一片空白
+	switch strings.ToLower(strings.TrimSpace(c.Settings.Proxy.Type)) {
+	case "socks5":
+		c.Settings.Proxy.Type = "socks5"
+	default:
+		c.Settings.Proxy.Type = "http"
 	}
 	return &c, nil
 }

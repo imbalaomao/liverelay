@@ -26,3 +26,6 @@ cache/
 
 # Wails 构建缓存（package.json 的哈希，用于决定是否重跑 npm install）
 frontend/package.json.md5
+
+# 验证脚本产生的截图
+build/screenshot-*.png

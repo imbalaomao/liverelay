@@ -67,3 +67,35 @@ body {
   background: var(--color-ink-600);
   border-radius: 8px;
 }
+
+.card {
+  transition: transform 0.18s ease, border-color 0.18s ease;
+}
+.card:hover {
+  transform: translateY(-1px);
+  border-color: #2f3a4f;
+}
+
+input,
+select,
+textarea {
+  outline: none;
+}
+input:focus,
+select:focus,
+textarea:focus {
+  border-color: var(--color-acc) !important;
+}
+
+/* 输入框里的文本要能选中复制，页面其余部分禁用选择以贴近原生应用观感 */
+input,
+textarea,
+code,
+.selectable {
+  user-select: text;
+}
+
+/* 自绘标题栏：拖拽区与按钮区必须分开，否则按钮点不动 */
+.no-drag {
+  --wails-draggable: no-drag;
+}

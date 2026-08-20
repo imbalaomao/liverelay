@@ -3,18 +3,26 @@ package main
 import (
 	"context"
 	"runtime/debug"
+	"time"
 
+	"github.com/imbalaomao/liverelay/internal/appcore"
 	"github.com/imbalaomao/liverelay/internal/config"
 	"github.com/imbalaomao/liverelay/internal/paths"
 	"github.com/imbalaomao/liverelay/internal/power"
+	"github.com/imbalaomao/liverelay/internal/tools"
 	"github.com/imbalaomao/liverelay/internal/tray"
-	"github.com/imbalaomao/liverelay/internal/updater"
-	"github.com/imbalaomao/liverelay/internal/weibo"
 	wruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 // version 由构建时注入（-ldflags "-X main.version=..."）；开发构建回落到模块信息。
 var version = ""
+
+// pushEvent 是推给前端的事件名。
+const pushEvent = "tasks:changed"
+
+// flushInterval 决定节流期间攒下的变化多久补推一次。
+// 比 appcore.PushInterval 稍长，避免两者打架。
+const flushInterval = 400 * time.Millisecond
 
 // EnvInfo 是前端启动时需要的运行环境快照。
 type EnvInfo struct {
@@ -23,33 +31,31 @@ type EnvInfo struct {
 	DataDir string `json:"dataDir"`
 }
 
-// App 是 Wails 绑定层：只做参数校验与转发，业务逻辑留在 internal/ 各包内。
+// App 是 Wails 绑定层。这里只做参数转发与窗口操作，
+// 业务逻辑全在 internal/appcore —— 绑定层跑不起单元测试。
 type App struct {
 	ctx     context.Context
 	dataDir string
 	mode    paths.Mode
-	cfg     *config.Config
 
 	icon  []byte
+	core  *appcore.Core
 	tray  *tray.Service
 	power *power.Manager
-	weibo *weibo.Service
-	// weiboStop 停止微博 cookie 的周期复检循环。
-	weiboStop context.CancelFunc
+
+	stopFlush context.CancelFunc
 }
 
 func NewApp(icon []byte) *App { return &App{icon: icon} }
 
-// startup 在窗口创建后调用：判定数据根、建立目录布局、载入配置、拉起托盘与电源管理。
+// startup 在窗口创建后调用：判定数据根、载入配置、拉起所有后台组件。
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
+
 	root, mode, err := paths.Root()
 	if err != nil {
 		// 定位不到 exe 属于极端环境问题，退回当前目录下的 data/ 以保证可用
 		root, mode = "data", paths.Portable
-	}
-	if err := paths.Ensure(root); err != nil {
-		runtimeLogError(ctx, "创建数据目录失败: "+err.Error())
 	}
 	a.dataDir, a.mode = root, mode
 
@@ -58,7 +64,15 @@ func (a *App) startup(ctx context.Context) {
 		runtimeLogError(ctx, "配置载入失败，已回退默认配置: "+err.Error())
 		cfg = config.Default()
 	}
-	a.cfg = cfg
+
+	c, err := appcore.New(root, cfg)
+	if err != nil {
+		runtimeLogError(ctx, "初始化失败: "+err.Error())
+		return
+	}
+	a.core = c
+	a.core.OnLog = func(msg string) { runtimeLogError(ctx, msg) }
+	a.core.OnPush = a.push
 
 	a.power = power.New()
 	a.power.OnError = func(err error) {
@@ -68,32 +82,52 @@ func (a *App) startup(ctx context.Context) {
 
 	a.tray = tray.New(a.icon, a.ShowWindow, a.Quit)
 	a.tray.Start()
-	a.tray.SetStatus(a.runningTasks())
 
-	a.startWeibo(cfg)
+	fctx, cancel := context.WithCancel(context.Background())
+	a.stopFlush = cancel
+	go a.flushLoop(fctx)
+
+	a.push(a.core.TaskViews())
 }
 
-// startWeibo 拉起微博 cookie 的周期复检。
-// 复检本身很轻（三天才真正打一次请求），但必须有个活着的循环，
-// 否则用户只有在点开播的那一刻才会发现登录早就失效了。
-func (a *App) startWeibo(cfg *config.Config) {
-	a.weibo = weibo.NewService(a.dataDir)
-
-	p := cfg.Settings.Proxy
-	if hc, err := updater.NewClient(p.Enabled, p.Type, p.Host, p.Port, p.Username, p.Password); err == nil {
-		a.weibo.UseHTTPClient(hc)
-	} else {
-		runtimeLogError(a.ctx, "代理设置有误，微博接口将直连: "+err.Error())
+// flushLoop 把节流窗口内攒下的变化补推给前端。
+// 没有它的话，一串密集事件的最后一条会被压住，界面会停在倒数第二个状态上。
+func (a *App) flushLoop(ctx context.Context) {
+	t := time.NewTicker(flushInterval)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			a.core.FlushPush()
+		}
 	}
+}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	a.weiboStop = cancel
-	go a.weibo.Run(ctx)
+// push 把最新任务视图发给前端，并顺带更新托盘提示与休眠抑制。
+func (a *App) push(views []appcore.TaskView) {
+	if a.ctx == nil {
+		return
+	}
+	wruntime.EventsEmit(a.ctx, pushEvent, views)
+
+	n := a.runningTasks()
+	if a.tray != nil {
+		a.tray.SetStatus(n)
+	}
+	if a.power != nil && a.core != nil {
+		a.power.Update(n, a.core.Settings().PreventSleep)
+	}
 }
 
 // beforeClose 接管窗口关闭按钮。返回 true 表示阻止关闭。
 func (a *App) beforeClose(ctx context.Context) bool {
-	switch tray.OnCloseRequested(a.cfg.Settings.CloseToTray, a.runningTasks()) {
+	closeToTray := true
+	if a.core != nil {
+		closeToTray = a.core.Settings().CloseToTray
+	}
+	switch tray.OnCloseRequested(closeToTray, a.runningTasks()) {
 	case tray.ActionHide:
 		wruntime.WindowHide(ctx)
 		return true
@@ -118,8 +152,11 @@ func (a *App) beforeClose(ctx context.Context) bool {
 
 // shutdown 在应用退出前收尾，负责归还系统资源。
 func (a *App) shutdown(ctx context.Context) {
-	if a.weiboStop != nil {
-		a.weiboStop()
+	if a.stopFlush != nil {
+		a.stopFlush()
+	}
+	if a.core != nil {
+		a.core.Close()
 	}
 	if a.tray != nil {
 		a.tray.Stop()
@@ -130,6 +167,15 @@ func (a *App) shutdown(ctx context.Context) {
 	}
 }
 
+func (a *App) runningTasks() int {
+	if a.core == nil {
+		return 0
+	}
+	return a.core.RunningCount()
+}
+
+// ---------- 窗口 ----------
+
 // ShowWindow 从托盘恢复主界面。
 func (a *App) ShowWindow() {
 	if a.ctx == nil {
@@ -139,17 +185,38 @@ func (a *App) ShowWindow() {
 	wruntime.WindowUnminimise(a.ctx)
 }
 
-// Quit 退出应用。
-func (a *App) Quit() {
+// MinimiseWindow 最小化。自绘标题栏要用。
+func (a *App) MinimiseWindow() {
+	if a.ctx != nil {
+		wruntime.WindowMinimise(a.ctx)
+	}
+}
+
+// ToggleMaximise 在最大化与还原之间切换。
+func (a *App) ToggleMaximise() {
+	if a.ctx != nil {
+		wruntime.WindowToggleMaximise(a.ctx)
+	}
+}
+
+// CloseWindow 走与点关闭按钮相同的策略。
+func (a *App) CloseWindow() {
 	if a.ctx == nil {
 		return
 	}
-	wruntime.Quit(a.ctx)
+	if !a.beforeClose(a.ctx) {
+		wruntime.Quit(a.ctx)
+	}
 }
 
-// runningTasks 返回当前占用推流槽位的任务数。
-// TaskManager 尚未接入绑定层（M3-7），此处先返回 0。
-func (a *App) runningTasks() int { return 0 }
+// Quit 退出应用。
+func (a *App) Quit() {
+	if a.ctx != nil {
+		wruntime.Quit(a.ctx)
+	}
+}
+
+// ---------- 环境 ----------
 
 // Env 返回运行环境快照，供 UI 状态栏显示。
 func (a *App) Env() EnvInfo {
@@ -164,4 +231,113 @@ func appVersion() string {
 		return info.Main.Version
 	}
 	return "dev"
+}
+
+// ---------- 任务 ----------
+
+func (a *App) Tasks() []appcore.TaskView { return a.core.TaskViews() }
+
+func (a *App) TaskForm(id string) config.Task {
+	t, _ := a.core.TaskForm(id)
+	return t
+}
+
+func (a *App) AddTask(t config.Task) (config.Task, error) {
+	got, err := a.core.AddTask(t)
+	a.pushNow()
+	return got, err
+}
+
+func (a *App) UpdateTask(t config.Task) (config.Task, error) {
+	got, err := a.core.UpdateTask(t)
+	a.pushNow()
+	return got, err
+}
+
+func (a *App) DeleteTask(id string) error {
+	err := a.core.DeleteTask(id)
+	a.pushNow()
+	return err
+}
+
+func (a *App) StartTask(id string) error { return a.core.StartTask(id) }
+func (a *App) StopTask(id string) error  { return a.core.StopTask(id) }
+
+func (a *App) TaskEvents(id string) []appcore.EventView { return a.core.Events(id) }
+
+// pushNow 在用户主动改动后立即刷新界面，不等节流窗口。
+func (a *App) pushNow() {
+	if a.core != nil {
+		a.push(a.core.TaskViews())
+	}
+}
+
+// ---------- 内核 ----------
+
+func (a *App) Tools() []appcore.ToolView { return a.core.ToolViews() }
+
+func (a *App) AddTool(t config.Tool) error  { return a.core.AddTool(t) }
+func (a *App) EditTool(t config.Tool) error { return a.core.EditTool(t) }
+func (a *App) DeleteTool(id string) error   { return a.core.DeleteTool(id) }
+
+func (a *App) SetToolPath(id, path string) error { return a.core.SetToolPath(id, path) }
+func (a *App) ResetToolPath(id string) error     { return a.core.ResetToolPath(id) }
+
+func (a *App) ProbeTool(id string) (tools.Info, error) {
+	return a.core.ProbeTool(a.ctx, id)
+}
+
+func (a *App) CheckToolUpdate(id string) (appcore.ReleaseView, error) {
+	return a.core.CheckToolUpdate(a.ctx, id)
+}
+
+func (a *App) UpgradeTool(id string) (appcore.ReleaseView, error) {
+	return a.core.UpgradeTool(a.ctx, id)
+}
+
+// PickExecutable 弹出文件选择框，返回用户选中的可执行文件路径。
+// 取消选择返回空串，不算错误。
+func (a *App) PickExecutable() (string, error) {
+	if a.ctx == nil {
+		return "", nil
+	}
+	return wruntime.OpenFileDialog(a.ctx, wruntime.OpenDialogOptions{
+		Title: "选择内核可执行文件",
+		Filters: []wruntime.FileFilter{
+			{DisplayName: "可执行文件 (*.exe)", Pattern: "*.exe"},
+			{DisplayName: "全部文件", Pattern: "*.*"},
+		},
+	})
+}
+
+// PickDirectory 弹出目录选择框，用于选录制目录。
+func (a *App) PickDirectory() (string, error) {
+	if a.ctx == nil {
+		return "", nil
+	}
+	return wruntime.OpenDirectoryDialog(a.ctx, wruntime.OpenDialogOptions{Title: "选择录制目录"})
+}
+
+// ---------- 设置 ----------
+
+func (a *App) Settings() config.Settings { return a.core.Settings() }
+
+func (a *App) SaveSettings(s config.Settings) error {
+	err := a.core.SaveSettings(s)
+	a.pushNow()
+	return err
+}
+
+// ---------- 微博 ----------
+
+func (a *App) WeiboState() appcore.WeiboView { return a.core.WeiboView() }
+
+func (a *App) SaveWeiboCookie(cookie string) (appcore.WeiboView, error) {
+	return a.core.SaveWeiboCookie(a.ctx, cookie)
+}
+
+func (a *App) ClearWeiboCookie() error { return a.core.ClearWeiboCookie() }
+
+func (a *App) CheckWeiboCookie() appcore.WeiboView {
+	return a.core.CheckWeiboCookie(a.ctx)
 }

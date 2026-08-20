@@ -45,6 +45,10 @@ type Target struct {
 	Proto string `json:"proto"` // "rtmp" | "srt" | "udp" | "hls"
 	URL   string `json:"url"`
 	Key   string `json:"key"`
+	// HasKey 只在发给界面的表单副本里用：密钥本身不回传，
+	// 但界面得知道这里原本是不是设过密钥，好显示成"已设置"而不是空。
+	// 不落配置文件。
+	HasKey bool `json:"hasKey,omitempty"`
 }
 
 type Task struct {

@@ -137,3 +137,32 @@ func TestLoadToleratesLeadingWhitespace(t *testing.T) {
 		t.Fatalf("前导空白不应导致解析失败: %v", err)
 	}
 }
+
+func TestDefaultProxyTypeIsValid(t *testing.T) {
+	// 默认留空会让设置页的下拉框选不中任何一项，看起来像坏了
+	c := Default()
+	if c.Settings.Proxy.Type != "http" {
+		t.Errorf("默认代理类型 = %q，应是 http 或 socks5 之一", c.Settings.Proxy.Type)
+	}
+}
+
+func TestParseNormalisesProxyType(t *testing.T) {
+	// 老配置里可能是空的或写错的，读进来要归一化——
+	// 否则设置页的下拉框选不中任何一项
+	dir := t.TempDir()
+	for _, in := range []string{`""`, `"HTTP"`, `"什么协议"`, `"socks5"`} {
+		path := filepath.Join(dir, "c.json")
+		body := `{"version":1,"settings":{"proxy":{"type":` + in + `}}}`
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		c, err := Load(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := c.Settings.Proxy.Type
+		if got != "http" && got != "socks5" {
+			t.Errorf("输入 %s 归一化成 %q，不是合法类型", in, got)
+		}
+	}
+}
