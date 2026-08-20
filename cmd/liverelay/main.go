@@ -14,28 +14,8 @@ import (
 	"github.com/imbalaomao/liverelay/internal/config"
 	"github.com/imbalaomao/liverelay/internal/core"
 	"github.com/imbalaomao/liverelay/internal/pipeline"
+	"github.com/imbalaomao/liverelay/internal/tools"
 )
-
-// resolve 把配置中的相对内核路径锚定到数据目录；绝对路径与 PATH 中的裸命令原样返回。
-func resolve(dataDir, p string) string {
-	if p == "" || filepath.IsAbs(p) {
-		return p
-	}
-	if !filepath.IsAbs(p) && filepath.Base(p) != p {
-		return filepath.Join(dataDir, p)
-	}
-	return p
-}
-
-// findTool 按 ID 查内核，避免依赖 Tools 切片顺序（用户可编辑 config.json）。
-func findTool(cfg *config.Config, id string) (config.Tool, bool) {
-	for _, t := range cfg.Tools {
-		if t.ID == id {
-			return t, true
-		}
-	}
-	return config.Tool{}, false
-}
 
 // M2 headless 冒烟入口：liverelay -source <直播源URL> -target <rtmp地址> [-key 密钥]
 func main() {
@@ -66,12 +46,12 @@ func main() {
 		ffmpeg = p
 	}
 
-	tool, ok := findTool(cfg, *toolID)
+	tool, ok := tools.Find(cfg, *toolID)
 	if !ok {
 		log.Fatalf("配置中不存在内核 %s", *toolID)
 	}
-	tool.Path = resolve(*dataDir, tool.Path)
-	tool.PathOverride = resolve(*dataDir, tool.PathOverride)
+	tool.Path = tools.Resolve(*dataDir, tool.Path)
+	tool.PathOverride = tools.Resolve(*dataDir, tool.PathOverride)
 	if _, err := exec.LookPath(tool.EffectivePath()); err != nil {
 		log.Fatalf("未找到 %s（%s）：请放入 %s/tools/ 或加入 PATH", tool.Name, tool.EffectivePath(), *dataDir)
 	}
