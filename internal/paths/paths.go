@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // appDirName 是安装模式下 %APPDATA% 内的目录名。
@@ -31,10 +32,22 @@ func (m Mode) Display() string {
 	return "安装"
 }
 
+// EnvDataDir 是显式指定数据根的环境变量名。
+//
+// 开发时 exe 位于 build/bin 下，按便携规则找的是 build/bin/data，
+// 看不见仓库根的 data/；打包发行后用户想把几百 MB 的内核与录像放到别的盘
+// 也需要这个口子。优先级高于其余一切判定。
+const EnvDataDir = "LIVERELAY_DATA"
+
 // resolve 是判定逻辑的纯函数内核（规格 §6.1）：
-// exe 同级存在 data/ 目录 → 便携模式；否则落到 %APPDATA%/LiveRelay。
+// 显式指定 → 用它；否则 exe 同级存在 data/ 目录 → 便携模式；
+// 再否则落到 %APPDATA%/LiveRelay。
 // APPDATA 缺失时退回便携，绝不返回空路径——否则数据会落到进程当前目录。
-func resolve(exeDir, appData string) (string, Mode) {
+func resolve(exeDir, appData, override string) (string, Mode) {
+	// 空白等同于没设：否则 set LIVERELAY_DATA= 会把数据根变成当前工作目录
+	if o := strings.TrimSpace(override); o != "" {
+		return o, Portable
+	}
 	portable := filepath.Join(exeDir, "data")
 	if st, err := os.Stat(portable); err == nil && st.IsDir() {
 		return portable, Portable
@@ -51,7 +64,7 @@ func Root() (string, Mode, error) {
 	if err != nil {
 		return "", "", fmt.Errorf("定位可执行文件: %w", err)
 	}
-	root, mode := resolve(filepath.Dir(exe), os.Getenv("APPDATA"))
+	root, mode := resolve(filepath.Dir(exe), os.Getenv("APPDATA"), os.Getenv(EnvDataDir))
 	return root, mode, nil
 }
 

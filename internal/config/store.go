@@ -19,7 +19,11 @@ func Default() *Config {
 			Theme: "dark", ProbeIntervalSec: 60,
 		},
 		Tools: []Tool{
-			{ID: "streamlink", Name: "streamlink", Builtin: true, Path: "tools/streamlink.exe", Role: "fetch",
+			// streamlink 的便携版是"整个目录"而不是单个 exe：exe 依赖同目录下的
+			// 内嵌 Python。默认路径必须与更新器整包落地的位置一致，否则第一次
+			// 更新完，配置里的路径就指向一个不存在的文件。
+			// internal/updater 里有一条测试专门盯着这两处别走散。
+			{ID: "streamlink", Name: "streamlink", Builtin: true, Path: "tools/streamlink/bin/streamlink.exe", Role: "fetch",
 				ArgTemplate:   []string{"{url}", "{quality}", "-O"},
 				ProbeTemplate: []string{"--json", "{url}"}},
 			{ID: "yt-dlp", Name: "yt-dlp", Builtin: true, Path: "tools/yt-dlp.exe", Role: "fetch",

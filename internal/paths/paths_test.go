@@ -12,7 +12,7 @@ func TestResolvePrefersPortableWhenDataDirExists(t *testing.T) {
 	if err := os.Mkdir(portable, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	root, mode := resolve(exeDir, filepath.Join(t.TempDir(), "AppData"))
+	root, mode := resolve(exeDir, filepath.Join(t.TempDir(), "AppData"), "")
 	if mode != Portable {
 		t.Fatalf("exe 同级存在 data/ 时应为便携模式，得到 %s", mode)
 	}
@@ -24,7 +24,7 @@ func TestResolvePrefersPortableWhenDataDirExists(t *testing.T) {
 func TestResolveFallsBackToAppData(t *testing.T) {
 	exeDir := t.TempDir() // 不创建 data/
 	appData := t.TempDir()
-	root, mode := resolve(exeDir, appData)
+	root, mode := resolve(exeDir, appData, "")
 	if mode != Installed {
 		t.Fatalf("无 data/ 时应为安装模式，得到 %s", mode)
 	}
@@ -36,7 +36,7 @@ func TestResolveFallsBackToAppData(t *testing.T) {
 // APPDATA 缺失（非常规环境）时不能返回空路径，否则会把数据写到进程当前目录。
 func TestResolveWithoutAppDataFallsBackToExeDir(t *testing.T) {
 	exeDir := t.TempDir()
-	root, mode := resolve(exeDir, "")
+	root, mode := resolve(exeDir, "", "")
 	if mode != Portable {
 		t.Fatalf("APPDATA 缺失时应退回便携模式，得到 %s", mode)
 	}
@@ -52,7 +52,7 @@ func TestResolveIgnoresDataFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	appData := t.TempDir()
-	_, mode := resolve(exeDir, appData)
+	_, mode := resolve(exeDir, appData, "")
 	if mode != Installed {
 		t.Fatalf("data 为普通文件时应为安装模式，得到 %s", mode)
 	}
@@ -143,5 +143,44 @@ func TestMakePortableDoesNotOverwriteExisting(t *testing.T) {
 	got, _ := os.ReadFile(ConfigFile(dst))
 	if string(got) != string(keep) {
 		t.Fatalf("已有便携配置被覆盖: %s", got)
+	}
+}
+
+func TestResolveEnvOverride(t *testing.T) {
+	// 开发时 exe 在 build/bin 下，按便携规则找的是 build/bin/data，
+	// 看不到仓库根的 data/。给一个显式指定数据根的口子。
+	dir := t.TempDir()
+	root, mode := resolve(`C:\app`, `C:\Users\x\AppData\Roaming`, dir)
+	if root != dir {
+		t.Errorf("root = %q, 期望 %q", root, dir)
+	}
+	if mode != Portable {
+		t.Errorf("显式指定数据根应视为便携模式，实际 %v", mode)
+	}
+}
+
+func TestResolveEnvOverrideBeatsPortableDir(t *testing.T) {
+	// 显式指定优先级最高，否则在 exe 同级有 data/ 时就没法改到别处去
+	exeDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(exeDir, "data"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	override := t.TempDir()
+	if root, _ := resolve(exeDir, "", override); root != override {
+		t.Errorf("root = %q, 期望显式指定的 %q", root, override)
+	}
+}
+
+func TestResolveEnvOverrideIgnoresBlank(t *testing.T) {
+	// 环境变量设成空串或空白等同于没设，不能把数据根变成当前工作目录
+	exeDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(exeDir, "data"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(exeDir, "data")
+	for _, blank := range []string{"", "   ", "\t"} {
+		if root, mode := resolve(exeDir, "", blank); root != want || mode != Portable {
+			t.Errorf("空白覆盖值 %q 应被忽略，实际 %q / %v", blank, root, mode)
+		}
 	}
 }
