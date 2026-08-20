@@ -21,7 +21,8 @@ var transitions = map[State][]State{
 	StateRunning:      {StateReconnecting, StateIdle, StateFailed},
 	StateReconnecting: {StateStarting, StateRunning, StateFailed, StateIdle},
 	StateFailed:       {StateIdle, StateStarting, StateMonitoring},
-	StateMonitoring:   {StateStarting, StateIdle},
+	// 探测到开播后若并发已满，任务会直接进入排队
+	StateMonitoring: {StateStarting, StateQueued, StateIdle},
 }
 
 func CanTransition(from, to State) bool {

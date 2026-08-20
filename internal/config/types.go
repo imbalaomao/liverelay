@@ -29,6 +29,9 @@ type Tool struct {
 	CapSummary   string   `json:"capSummary"`
 	Role         string   `json:"role"` // "fetch" | "record" | "both"
 	ArgTemplate  []string `json:"argTemplate"`
+	// ProbeTemplate 是"探测源站是否开播"用的参数模板。为空表示该内核无法用于
+	// 无人值守——各家工具的探测方式没有通用写法，猜一个只会得到误判。
+	ProbeTemplate []string `json:"probeTemplate"`
 }
 
 func (t Tool) EffectivePath() string {

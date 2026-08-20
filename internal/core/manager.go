@@ -126,6 +126,23 @@ func (m *Manager) claimLocked(id string) (context.Context, *run) {
 	return ctx, h
 }
 
+// SetMonitoring 把任务标记为"无人值守探测中"。
+// 已在探测中时是空操作——探测服务每轮都会调用它，若每次都走 transition，
+// monitoring→monitoring 这个非法迁移会往事件日志里灌满告警。
+func (m *Manager) SetMonitoring(id string) error {
+	m.mu.Lock()
+	st := m.stateOfLocked(id)
+	m.mu.Unlock()
+	if st == StateMonitoring {
+		return nil
+	}
+	if !CanTransition(st, StateMonitoring) {
+		return fmt.Errorf("任务 %s 当前状态 %s，无法进入探测", id, st)
+	}
+	m.transition(id, StateMonitoring, "无人值守探测中")
+	return nil
+}
+
 // Start 启动任务；超出并发上限时进入排队，有空闲槽位后自动启动。
 func (m *Manager) Start(id string) error {
 	if _, ok := m.findTask(id); !ok {
@@ -133,7 +150,8 @@ func (m *Manager) Start(id string) error {
 	}
 	m.mu.Lock()
 	st := m.stateOfLocked(id)
-	if st != StateIdle && st != StateFailed {
+	// 探测态也可启动：无人值守探到开播就是从这里进入推流的
+	if st != StateIdle && st != StateFailed && st != StateMonitoring {
 		m.mu.Unlock()
 		return fmt.Errorf("任务 %s 当前状态 %s，无法启动", id, st)
 	}

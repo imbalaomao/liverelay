@@ -303,3 +303,67 @@ func TestManagerStopThenRestartKeepsNewRunControllable(t *testing.T) {
 		t.Fatalf("全部停止后运行计数应归零，实得 %d", got)
 	}
 }
+
+func TestSetMonitoringThenStart(t *testing.T) {
+	// 无人值守探到开播就是从探测态直接进推流，这条路必须通
+	ff := &fakeFactory{}
+	m := NewManager(testCfg(2, "a"), ff.make, nil)
+
+	if err := m.SetMonitoring("a"); err != nil {
+		t.Fatalf("进入探测态失败: %v", err)
+	}
+	if got := m.State("a"); got != StateMonitoring {
+		t.Fatalf("State = %s, 期望 monitoring", got)
+	}
+	if err := m.Start("a"); err != nil {
+		t.Fatalf("探测态应能启动: %v", err)
+	}
+	waitState(t, m, "a", StateRunning)
+	_ = m.Stop("a")
+	waitState(t, m, "a", StateIdle)
+}
+
+func TestSetMonitoringIsIdempotent(t *testing.T) {
+	// 探测服务每轮都会调它。若每次都走一遍迁移，monitoring→monitoring
+	// 这个非法迁移会往事件日志里灌满"忽略非法迁移"告警
+	var events []Event
+	var mu sync.Mutex
+	ff := &fakeFactory{}
+	m := NewManager(testCfg(2, "a"), ff.make, func(ev Event) {
+		mu.Lock()
+		events = append(events, ev)
+		mu.Unlock()
+	})
+
+	for i := 0; i < 5; i++ {
+		if err := m.SetMonitoring("a"); err != nil {
+			t.Fatalf("第 %d 次进入探测态失败: %v", i, err)
+		}
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(events) != 1 {
+		t.Errorf("重复进入探测态应只发一条事件，实际 %d 条: %+v", len(events), events)
+	}
+	for _, ev := range events {
+		if strings.Contains(ev.Msg, "非法迁移") {
+			t.Errorf("不应出现非法迁移告警: %q", ev.Msg)
+		}
+	}
+}
+
+func TestSetMonitoringRejectedWhileRunning(t *testing.T) {
+	ff := &fakeFactory{}
+	m := NewManager(testCfg(2, "a"), ff.make, nil)
+	if err := m.Start("a"); err != nil {
+		t.Fatal(err)
+	}
+	waitState(t, m, "a", StateRunning)
+
+	if err := m.SetMonitoring("a"); err == nil {
+		t.Error("推流中的任务不应能被改成探测态")
+	}
+	_ = m.Stop("a")
+	waitState(t, m, "a", StateIdle)
+}

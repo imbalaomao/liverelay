@@ -19,9 +19,12 @@ func Default() *Config {
 		},
 		Tools: []Tool{
 			{ID: "streamlink", Name: "streamlink", Builtin: true, Path: "tools/streamlink.exe", Role: "fetch",
-				ArgTemplate: []string{"{url}", "{quality}", "-O"}},
+				ArgTemplate:   []string{"{url}", "{quality}", "-O"},
+				ProbeTemplate: []string{"--json", "{url}"}},
 			{ID: "yt-dlp", Name: "yt-dlp", Builtin: true, Path: "tools/yt-dlp.exe", Role: "fetch",
-				ArgTemplate: []string{"-o", "-", "{url}"}},
+				ArgTemplate:   []string{"-o", "-", "{url}"},
+				ProbeTemplate: []string{"--dump-json", "--no-download", "{url}"}},
+			// ffmpeg 只做推流与录制出口，不承担探测开播的职责
 			{ID: "ffmpeg", Name: "ffmpeg", Builtin: true, Path: "tools/ffmpeg.exe", Role: "both"},
 		},
 	}
