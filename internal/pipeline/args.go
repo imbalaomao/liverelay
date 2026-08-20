@@ -28,6 +28,7 @@ func Tokenize(s string) ([]string, error) {
 	var cur strings.Builder
 	var quote rune // 0 表示不在引号内
 	escaped := false
+	quoteEscaped := false
 	hasToken := false
 
 	flush := func() {
@@ -42,7 +43,14 @@ func Tokenize(s string) ([]string, error) {
 		case escaped:
 			cur.WriteRune(r)
 			escaped = false
-		case r == '\\':
+		case quoteEscaped:
+			cur.WriteRune(r)
+			quoteEscaped = false
+		case quote != 0 && r == '\\':
+			quoteEscaped = true
+			cur.WriteRune(r)
+			hasToken = true
+		case quote == 0 && r == '\\':
 			escaped = true
 			hasToken = true
 		case quote != 0:
@@ -65,7 +73,7 @@ func Tokenize(s string) ([]string, error) {
 	if escaped {
 		cur.WriteRune('\\')
 	}
-	if quote != 0 {
+	if quote != 0 || quoteEscaped {
 		return nil, fmt.Errorf("自定义参数存在未闭合引号")
 	}
 	flush()

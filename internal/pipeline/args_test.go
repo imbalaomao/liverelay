@@ -16,6 +16,11 @@ func TestTokenize(t *testing.T) {
 		{`a\ b`, []string{"a b"}},
 		{`  --x   y  `, []string{"--x", "y"}},
 		{`""`, []string{""}},
+		{`--save-dir "D:\rec\new"`, []string{"--save-dir", `D:\rec\new`}},
+		{`--key 'C:\path with space'`, []string{"--key", `C:\path with space`}},
+		{`"a\"b"`, []string{`a\"b`}},
+		{``, nil},
+		{`   `, nil},
 	}
 	for _, c := range cases {
 		got, err := Tokenize(c.in)
