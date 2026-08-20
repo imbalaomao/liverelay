@@ -273,8 +273,8 @@ const toggles = [
 document.getElementById('toggles').innerHTML = toggles.map(([t, d, on]) => `
   <label class="flex items-center justify-between cursor-pointer">
     <div><div class="text-sm">${t}</div><div class="text-[11px] text-mute mt-0.5">${d}</div></div>
-    <div onclick="this.classList.toggle('on');this.firstElementChild.classList.toggle('translate-x-5')"
-         class="w-10 h-5.5 h-6 rounded-full p-0.5 fade ${on?'bg-acc':'bg-ink-600'}">
+    <div data-on="${on}" onclick="const on=this.dataset.on==='true';this.dataset.on=!on;this.classList.toggle('bg-acc',!on);this.classList.toggle('bg-ink-600',on);this.firstElementChild.classList.toggle('translate-x-4',!on)"
+         class="w-10 h-6 rounded-full p-0.5 fade ${on?'bg-acc':'bg-ink-600'}">
       <div class="w-5 h-5 rounded-full bg-white shadow fade ${on?'translate-x-4':''}"></div>
     </div>
   </label>`).join('');
