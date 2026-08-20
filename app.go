@@ -8,6 +8,8 @@ import (
 	"github.com/imbalaomao/liverelay/internal/paths"
 	"github.com/imbalaomao/liverelay/internal/power"
 	"github.com/imbalaomao/liverelay/internal/tray"
+	"github.com/imbalaomao/liverelay/internal/updater"
+	"github.com/imbalaomao/liverelay/internal/weibo"
 	wruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
@@ -31,6 +33,9 @@ type App struct {
 	icon  []byte
 	tray  *tray.Service
 	power *power.Manager
+	weibo *weibo.Service
+	// weiboStop 停止微博 cookie 的周期复检循环。
+	weiboStop context.CancelFunc
 }
 
 func NewApp(icon []byte) *App { return &App{icon: icon} }
@@ -64,6 +69,26 @@ func (a *App) startup(ctx context.Context) {
 	a.tray = tray.New(a.icon, a.ShowWindow, a.Quit)
 	a.tray.Start()
 	a.tray.SetStatus(a.runningTasks())
+
+	a.startWeibo(cfg)
+}
+
+// startWeibo 拉起微博 cookie 的周期复检。
+// 复检本身很轻（三天才真正打一次请求），但必须有个活着的循环，
+// 否则用户只有在点开播的那一刻才会发现登录早就失效了。
+func (a *App) startWeibo(cfg *config.Config) {
+	a.weibo = weibo.NewService(a.dataDir)
+
+	p := cfg.Settings.Proxy
+	if hc, err := updater.NewClient(p.Enabled, p.Type, p.Host, p.Port, p.Username, p.Password); err == nil {
+		a.weibo.UseHTTPClient(hc)
+	} else {
+		runtimeLogError(a.ctx, "代理设置有误，微博接口将直连: "+err.Error())
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	a.weiboStop = cancel
+	go a.weibo.Run(ctx)
 }
 
 // beforeClose 接管窗口关闭按钮。返回 true 表示阻止关闭。
@@ -93,6 +118,9 @@ func (a *App) beforeClose(ctx context.Context) bool {
 
 // shutdown 在应用退出前收尾，负责归还系统资源。
 func (a *App) shutdown(ctx context.Context) {
+	if a.weiboStop != nil {
+		a.weiboStop()
+	}
 	if a.tray != nil {
 		a.tray.Stop()
 	}

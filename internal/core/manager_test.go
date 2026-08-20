@@ -367,3 +367,104 @@ func TestSetMonitoringRejectedWhileRunning(t *testing.T) {
 	_ = m.Stop("a")
 	waitState(t, m, "a", StateIdle)
 }
+
+// ---------- 启动前钩子 ----------
+
+func TestPrepareRewritesTaskBeforeStart(t *testing.T) {
+	// 微博直播的推流地址要在拉起子进程前实时取，不能存在配置里
+	var got config.Task
+	ff := &fakeFactory{}
+	m := NewManager(testCfg(2, "a"), func(task config.Task) Runner {
+		got = task
+		return ff.make(task)
+	}, nil)
+	m.Prepare = func(_ context.Context, task config.Task) (config.Task, error) {
+		task.Targets = append(task.Targets, config.Target{
+			Proto: "rtmp", URL: "rtmp://weibo/alive/", Key: "freshkey",
+		})
+		return task, nil
+	}
+
+	if err := m.Start("a"); err != nil {
+		t.Fatal(err)
+	}
+	waitState(t, m, "a", StateRunning)
+	if len(got.Targets) != 2 || got.Targets[1].Key != "freshkey" {
+		t.Errorf("Prepare 改写的任务没有传到 Runner: %+v", got.Targets)
+	}
+	_ = m.Stop("a")
+	waitState(t, m, "a", StateIdle)
+}
+
+func TestPrepareFailureFailsTask(t *testing.T) {
+	// cookie 过期时必须给出能看懂的原因，而不是让用户对着一个起不来的任务发呆
+	var msgs []string
+	var mu sync.Mutex
+	ff := &fakeFactory{}
+	m := NewManager(testCfg(2, "a"), ff.make, func(ev Event) {
+		mu.Lock()
+		msgs = append(msgs, ev.Msg)
+		mu.Unlock()
+	})
+	m.Prepare = func(context.Context, config.Task) (config.Task, error) {
+		return config.Task{}, errors.New("微博 cookie 已失效，请重新录入")
+	}
+
+	if err := m.Start("a"); err != nil {
+		t.Fatal(err)
+	}
+	waitState(t, m, "a", StateFailed)
+
+	mu.Lock()
+	defer mu.Unlock()
+	found := false
+	for _, msg := range msgs {
+		if strings.Contains(msg, "cookie 已失效") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("失败原因未传达给用户: %v", msgs)
+	}
+}
+
+func TestPrepareRunsAgainOnReconnect(t *testing.T) {
+	// 重连时推流地址可能已经换了，必须重新取一次
+	var calls int
+	var mu sync.Mutex
+	ff := &fakeFactory{}
+	m := NewManager(testCfg(2, "a"), ff.make, nil)
+	m.newBackoff = func() *Backoff { return &Backoff{Min: time.Millisecond, Max: time.Millisecond} }
+	m.Prepare = func(_ context.Context, task config.Task) (config.Task, error) {
+		mu.Lock()
+		calls++
+		mu.Unlock()
+		return task, nil
+	}
+
+	if err := m.Start("a"); err != nil {
+		t.Fatal(err)
+	}
+	ff.waitN(t, 1)
+	ff.get(0).exit <- ExitInfo{Err: errors.New("断流")}
+	ff.waitN(t, 2)
+
+	mu.Lock()
+	n := calls
+	mu.Unlock()
+	if n < 2 {
+		t.Errorf("重连时应重新解析一次，实际只调用了 %d 次", n)
+	}
+	_ = m.Stop("a")
+}
+
+func TestNilPrepareIsFine(t *testing.T) {
+	ff := &fakeFactory{}
+	m := NewManager(testCfg(2, "a"), ff.make, nil)
+	if err := m.Start("a"); err != nil {
+		t.Fatal(err)
+	}
+	waitState(t, m, "a", StateRunning)
+	_ = m.Stop("a")
+	waitState(t, m, "a", StateIdle)
+}

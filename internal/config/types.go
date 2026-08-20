@@ -58,6 +58,9 @@ type Task struct {
 	AutoRecord   bool     `json:"autoRecord"`
 	RecordToolID string   `json:"recordToolId"`
 	CustomArgs   string   `json:"customArgs"`
+	// WeiboLive 开启后，开播时会用本地保存的微博 cookie 现取一条推流地址
+	// 追加到 Targets，并给出对应的 HLS 观看链接。地址不落配置：它会变。
+	WeiboLive bool `json:"weiboLive"`
 }
 
 type Config struct {

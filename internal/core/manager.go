@@ -25,8 +25,18 @@ type run struct {
 	runner Runner // 受 Manager.mu 保护
 }
 
+// Prepare 在每次拉起子进程之前调用，可以改写任务或拒绝启动。
+//
+// 存在的理由是"微博直播"这类推流地址不能落到配置里的场景：地址必须在开播那一刻
+// 现取。放在 supervise 里而不是 Start 里，是为了让手动开播、无人值守自动开播、
+// 断流重连三条路径都经过同一处解析——重连时地址可能已经换了。
+type Prepare func(ctx context.Context, t config.Task) (config.Task, error)
+
 // Manager 调度全部推流任务：并发上限排队、异常退避重连、优雅停止。
 type Manager struct {
+	// Prepare 可选。为 nil 时任务原样交给 RunnerFactory。
+	Prepare Prepare
+
 	mu      sync.Mutex
 	cfg     *config.Config
 	factory RunnerFactory
@@ -264,7 +274,21 @@ func (m *Manager) supervise(id string, ctx context.Context, h *run) {
 		if !first { // 首轮的"启动中"已由 Start / 队列轮转同步置好
 			m.transition(id, StateStarting, "重连启动子进程")
 		}
-		r := m.factory(task)
+		// 每一轮都重新解析：微博这类推流地址可能在重连之间就换掉了
+		round := task
+		if m.Prepare != nil {
+			prepared, err := m.Prepare(ctx, task)
+			if err != nil {
+				if ctx.Err() != nil {
+					final, finalMsg = StateIdle, "已停止"
+					return
+				}
+				final, finalMsg = StateFailed, err.Error()
+				return
+			}
+			round = prepared
+		}
+		r := m.factory(round)
 		m.mu.Lock()
 		h.runner = r
 		m.mu.Unlock()
