@@ -138,8 +138,11 @@ func (r *Runner) Start(ctx context.Context) error {
 		return err
 	}
 	if r.opts.Record {
-		_ = os.MkdirAll(filepath.Join(r.opts.DataDir, "recordings", SanitizeName(r.opts.Task.Name)), 0o755)
+		_ = os.MkdirAll(filepath.Join(r.opts.DataDir, "recordings", SanitizeName(r.opts.Task.Name)), 0o750)
 	}
+	// #nosec G204 -- 拉起用户指定的内核与 ffmpeg 正是本程序的用途。
+	// 三重约束保证这不是命令注入面：可执行文件路径来自用户在界面上的显式选择；
+	// 参数以数组逐个传递、绝不拼接成命令行；全程不经 shell。
 	r.ff = exec.CommandContext(ctx, r.opts.FFmpegPath, ffArgs...)
 	r.fetch = exec.CommandContext(ctx, r.opts.FetchTool.EffectivePath(), fetchArgs...)
 	if r.opts.ProxyURL != "" {

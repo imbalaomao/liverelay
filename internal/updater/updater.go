@@ -173,7 +173,7 @@ func (u *Updater) doUpdate(ctx context.Context, src Source, toolsDir string) (Re
 	if err != nil {
 		return Result{}, err
 	}
-	if err := os.MkdirAll(toolsDir, 0o755); err != nil {
+	if err := os.MkdirAll(toolsDir, 0o750); err != nil {
 		return Result{}, err
 	}
 
@@ -388,7 +388,7 @@ func install(staged, target string) error {
 	if _, err := os.Stat(staged); err != nil {
 		return fmt.Errorf("暂存文件不可用: %w", err)
 	}
-	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(target), 0o750); err != nil {
 		return err
 	}
 
@@ -427,7 +427,9 @@ func moveFile(src, dst string) error {
 	}
 	defer in.Close()
 
-	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o755)
+	// #nosec G302 -- 换入的是可执行文件，0600 不带执行位就跑不起来；
+	// 0700 已是"仅本用户可执行"的最小权限
+	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o700)
 	if err != nil {
 		return err
 	}

@@ -99,6 +99,8 @@ func Save(path string, c *Config) error {
 	if err != nil {
 		return err
 	}
+	// #nosec G703 G304 -- path 由数据根拼上常量文件名得到，数据根是用户为自己
+	// 这台机器选定的目录，没有外部可控的路径片段
 	if old, err := os.ReadFile(path); err == nil {
 		if werr := os.WriteFile(path+".bak", old, 0o600); werr != nil {
 			return werr

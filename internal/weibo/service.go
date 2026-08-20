@@ -147,7 +147,7 @@ func (s *Service) setStateLocked(st State) {
 	if err != nil {
 		return
 	}
-	_ = os.MkdirAll(s.dir, 0o755)
+	_ = os.MkdirAll(s.dir, 0o700)
 	// 状态丢了最多多检测一次，不值得为它中断主流程
 	_ = os.WriteFile(s.statePath(), body, 0o600)
 }

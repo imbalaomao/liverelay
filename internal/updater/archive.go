@@ -38,7 +38,7 @@ func extractTreeLimit(zipPath, dst string, maxBytes int64, maxEntries int) (err 
 
 	strip := commonTopDir(zr.File)
 
-	if err := os.MkdirAll(dst, 0o755); err != nil {
+	if err := os.MkdirAll(dst, 0o750); err != nil {
 		return err
 	}
 	// 中途失败就把半成品清掉，不留一堆解了一半的文件让用户困惑
@@ -60,12 +60,12 @@ func extractTreeLimit(zipPath, dst string, maxBytes int64, maxEntries int) (err 
 		out := filepath.Join(dst, filepath.FromSlash(rel))
 
 		if f.FileInfo().IsDir() {
-			if err := os.MkdirAll(out, 0o755); err != nil {
+			if err := os.MkdirAll(out, 0o750); err != nil {
 				return err
 			}
 			continue
 		}
-		if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil {
+		if err := os.MkdirAll(filepath.Dir(out), 0o750); err != nil {
 			return err
 		}
 		n, werr := writeEntry(f, out, maxBytes-total)
@@ -164,7 +164,7 @@ func installTree(staged, target string) error {
 	if err != nil || !st.IsDir() {
 		return fmt.Errorf("暂存目录不可用: %w", err)
 	}
-	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(target), 0o750); err != nil {
 		return err
 	}
 

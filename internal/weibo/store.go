@@ -70,7 +70,7 @@ func (s *Store) Save(cookie string) error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(s.dir, 0o755); err != nil {
+	if err := os.MkdirAll(s.dir, 0o700); err != nil {
 		return err
 	}
 
@@ -97,6 +97,9 @@ func (s *Store) Save(cookie string) error {
 // ErrNoCookie。因为对用户来说这些都是同一件事：请重新录入。
 // 尤其是便携目录被拷到另一台机器时，DPAPI 必然解不开，那不是故障。
 func (s *Store) Load() (string, error) {
+	// #nosec G703 G304 -- 路径由数据根拼固定文件名得到，数据根是用户为自己的
+	// 这台机器选定的目录（便携目录 / %APPDATA% / LIVERELAY_DATA），不存在外部
+	// 可控的路径片段；文件名是常量，没有拼接空间。
 	body, err := os.ReadFile(s.Path())
 	if errors.Is(err, os.ErrNotExist) {
 		return "", ErrNoCookie

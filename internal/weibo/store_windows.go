@@ -24,11 +24,20 @@ type dataBlob struct {
 	pbData *byte
 }
 
-func newBlob(b []byte) dataBlob {
+// maxBlobBytes 是交给 DPAPI 的数据长度上限。
+// cbData 是 uint32，超长转换会静默截断——那意味着只加密了开头一小段，
+// 剩下的悄悄丢掉，用户直到解密时才发现 cookie 是残的。宁可当场拒绝。
+const maxBlobBytes = 1 << 20
+
+func newBlob(b []byte) (dataBlob, error) {
 	if len(b) == 0 {
-		return dataBlob{}
+		return dataBlob{}, nil
 	}
-	return dataBlob{cbData: uint32(len(b)), pbData: &b[0]}
+	if len(b) > maxBlobBytes {
+		return dataBlob{}, fmt.Errorf("数据长度 %d 超过 %d 字节上限", len(b), maxBlobBytes)
+	}
+	// #nosec G115 -- 上面刚判过 len(b) <= maxBlobBytes（1MiB），转换不会溢出
+	return dataBlob{cbData: uint32(len(b)), pbData: &b[0]}, nil
 }
 
 // bytes 把 DPAPI 返回的内存复制成 Go 切片。必须复制：
@@ -51,10 +60,17 @@ var (
 )
 
 func protectData(plain []byte) ([]byte, error) {
-	in, ent := newBlob(plain), newBlob(entropy)
+	in, err := newBlob(plain)
+	if err != nil {
+		return nil, err
+	}
+	ent, err := newBlob(entropy)
+	if err != nil {
+		return nil, err
+	}
 	var out dataBlob
 
-	r, _, err := procCryptProtect.Call(
+	r, _, callErr := procCryptProtect.Call(
 		uintptr(unsafe.Pointer(&in)),
 		0, // 描述串，不需要
 		uintptr(unsafe.Pointer(&ent)),
@@ -63,17 +79,24 @@ func protectData(plain []byte) ([]byte, error) {
 		uintptr(unsafe.Pointer(&out)),
 	)
 	if r == 0 {
-		return nil, fmt.Errorf("CryptProtectData 失败: %w", err)
+		return nil, fmt.Errorf("CryptProtectData 失败: %w", callErr)
 	}
 	defer procLocalFreeForBlob.Call(uintptr(unsafe.Pointer(out.pbData)))
 	return out.bytes(), nil
 }
 
 func unprotectData(sealed []byte) ([]byte, error) {
-	in, ent := newBlob(sealed), newBlob(entropy)
+	in, err := newBlob(sealed)
+	if err != nil {
+		return nil, err
+	}
+	ent, err := newBlob(entropy)
+	if err != nil {
+		return nil, err
+	}
 	var out dataBlob
 
-	r, _, err := procCryptUnprotect.Call(
+	r, _, callErr := procCryptUnprotect.Call(
 		uintptr(unsafe.Pointer(&in)),
 		0, // 输出描述串，不需要
 		uintptr(unsafe.Pointer(&ent)),
@@ -82,7 +105,7 @@ func unprotectData(sealed []byte) ([]byte, error) {
 		uintptr(unsafe.Pointer(&out)),
 	)
 	if r == 0 {
-		return nil, fmt.Errorf("CryptUnprotectData 失败: %w", err)
+		return nil, fmt.Errorf("CryptUnprotectData 失败: %w", callErr)
 	}
 	defer procLocalFreeForBlob.Call(uintptr(unsafe.Pointer(out.pbData)))
 	return out.bytes(), nil

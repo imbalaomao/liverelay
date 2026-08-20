@@ -77,7 +77,7 @@ func ConfigFile(root string) string { return filepath.Join(root, "config.json") 
 // Ensure 创建数据根及标准子目录，幂等。
 func Ensure(root string) error {
 	for _, d := range []string{root, Tools(root), Logs(root), Recordings(root), Cache(root)} {
-		if err := os.MkdirAll(d, 0o755); err != nil {
+		if err := os.MkdirAll(d, 0o700); err != nil {
 			return fmt.Errorf("创建目录 %s: %w", d, err)
 		}
 	}
