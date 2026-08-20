@@ -14,6 +14,11 @@ import (
 //go:embed all:frontend/dist
 var assets embed.FS
 
+// 托盘图标复用 Wails 的应用图标，避免同一份图标维护两处。
+//
+//go:embed build/windows/icon.ico
+var trayIcon []byte
+
 // 关于 WebView2 内存（资源红线）：实测空载整棵进程树约 330MB，其中 Go 侧仅 27MB，
 // 其余是 WebView2 的 browser/gpu/renderer/utility 进程，属于 Chromium 的固定开销。
 //
@@ -33,7 +38,7 @@ func runtimeLogError(ctx context.Context, msg string) {
 }
 
 func main() {
-	app := NewApp()
+	app := NewApp(trayIcon)
 
 	err := wails.Run(&options.App{
 		Title:  "LiveRelay",
@@ -49,6 +54,9 @@ func main() {
 		Frameless:        true,
 		BackgroundColour: &options.RGBA{R: 11, G: 13, B: 18, A: 1},
 		OnStartup:        app.startup,
+		// 关闭按钮交给"关闭到托盘"策略决定，退出前归还托盘与阻止休眠
+		OnBeforeClose: app.beforeClose,
+		OnShutdown:    app.shutdown,
 		Windows: &windows.Options{
 			WebviewIsTransparent: false,
 			WindowIsTranslucent:  false,

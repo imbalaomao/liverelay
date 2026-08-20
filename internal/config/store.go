@@ -1,6 +1,7 @@
 package config
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"os"
@@ -50,7 +51,14 @@ func Load(path string) (*Config, error) {
 	}
 }
 
+// utf8BOM 是 UTF-8 字节序标记。记事本、VS Code 的"UTF-8 with BOM"、
+// PowerShell 的 Set-Content -Encoding UTF8 都会写出它，而 encoding/json
+// 见到 BOM 直接报错——用户手改一次 config.json 就被静默重置回默认配置。
+var utf8BOM = []byte{0xEF, 0xBB, 0xBF}
+
 func parse(data []byte) (*Config, error) {
+	data = bytes.TrimPrefix(bytes.TrimLeft(data, " \t\r\n"), utf8BOM)
+
 	var c Config
 	if err := json.Unmarshal(data, &c); err != nil {
 		return nil, err

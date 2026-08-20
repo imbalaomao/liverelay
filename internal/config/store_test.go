@@ -103,3 +103,37 @@ func TestParseClampsSettings(t *testing.T) {
 		})
 	}
 }
+
+func TestLoadToleratesUTF8BOM(t *testing.T) {
+	// 记事本、VS Code 的"UTF-8 with BOM"、PowerShell 的 Set-Content -Encoding UTF8
+	// 都会写出带 BOM 的文件。json.Unmarshal 见到 BOM 直接报错，
+	// 结果是用户手改一次配置就被静默重置回默认值。
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+	body := `{"version":1,"settings":{"closeToTray":false,"maxConcurrent":3,"probeIntervalSec":90}}`
+	if err := os.WriteFile(path, append([]byte("\xef\xbb\xbf"), body...), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	c, err := Load(path)
+	if err != nil {
+		t.Fatalf("带 BOM 的配置应能正常读取: %v", err)
+	}
+	if c.Settings.CloseToTray {
+		t.Error("closeToTray 应为 false —— 配置被回退成默认值了")
+	}
+	if c.Settings.MaxConcurrent != 3 || c.Settings.ProbeIntervalSec != 90 {
+		t.Errorf("配置未正确读取: %+v", c.Settings)
+	}
+}
+
+func TestLoadToleratesLeadingWhitespace(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+	if err := os.WriteFile(path, []byte("\r\n  {\"version\":1}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(path); err != nil {
+		t.Fatalf("前导空白不应导致解析失败: %v", err)
+	}
+}

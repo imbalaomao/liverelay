@@ -3,3 +3,7 @@
 import {main} from '../models';
 
 export function Env():Promise<main.EnvInfo>;
+
+export function Quit():Promise<void>;
+
+export function ShowWindow():Promise<void>;

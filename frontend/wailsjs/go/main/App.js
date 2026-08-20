@@ -5,3 +5,11 @@
 export function Env() {
   return window['go']['main']['App']['Env']();
 }
+
+export function Quit() {
+  return window['go']['main']['App']['Quit']();
+}
+
+export function ShowWindow() {
+  return window['go']['main']['App']['ShowWindow']();
+}

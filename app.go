@@ -6,6 +6,9 @@ import (
 
 	"github.com/imbalaomao/liverelay/internal/config"
 	"github.com/imbalaomao/liverelay/internal/paths"
+	"github.com/imbalaomao/liverelay/internal/power"
+	"github.com/imbalaomao/liverelay/internal/tray"
+	wruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 // version 由构建时注入（-ldflags "-X main.version=..."）；开发构建回落到模块信息。
@@ -24,11 +27,15 @@ type App struct {
 	dataDir string
 	mode    paths.Mode
 	cfg     *config.Config
+
+	icon  []byte
+	tray  *tray.Service
+	power *power.Manager
 }
 
-func NewApp() *App { return &App{} }
+func NewApp(icon []byte) *App { return &App{icon: icon} }
 
-// startup 在窗口创建后调用：判定数据根、建立目录布局、载入配置。
+// startup 在窗口创建后调用：判定数据根、建立目录布局、载入配置、拉起托盘与电源管理。
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 	root, mode, err := paths.Root()
@@ -47,7 +54,74 @@ func (a *App) startup(ctx context.Context) {
 		cfg = config.Default()
 	}
 	a.cfg = cfg
+
+	a.power = power.New()
+	a.power.OnError = func(err error) {
+		// 设不上必须让用户知道，否则"我明明开了不休眠"会变成查不出原因的断流
+		runtimeLogError(ctx, "阻止休眠失败: "+err.Error())
+	}
+
+	a.tray = tray.New(a.icon, a.ShowWindow, a.Quit)
+	a.tray.Start()
+	a.tray.SetStatus(a.runningTasks())
 }
+
+// beforeClose 接管窗口关闭按钮。返回 true 表示阻止关闭。
+func (a *App) beforeClose(ctx context.Context) bool {
+	switch tray.OnCloseRequested(a.cfg.Settings.CloseToTray, a.runningTasks()) {
+	case tray.ActionHide:
+		wruntime.WindowHide(ctx)
+		return true
+	case tray.ActionConfirmQuit:
+		sel, err := wruntime.MessageDialog(ctx, wruntime.MessageDialogOptions{
+			Type:          wruntime.QuestionDialog,
+			Title:         "仍在推流",
+			Message:       "还有任务正在推流，退出会立即中断。确定要退出吗？",
+			Buttons:       []string{"退出", "取消"},
+			DefaultButton: "取消",
+			CancelButton:  "取消",
+		})
+		if err != nil {
+			// 弹不出对话框时按"别退"处理，宁可多留一个窗口也不要静默掐断直播
+			return true
+		}
+		return sel != "退出"
+	default:
+		return false
+	}
+}
+
+// shutdown 在应用退出前收尾，负责归还系统资源。
+func (a *App) shutdown(ctx context.Context) {
+	if a.tray != nil {
+		a.tray.Stop()
+	}
+	if a.power != nil {
+		// 不归还的话，系统会一直被按着不许睡
+		a.power.Close()
+	}
+}
+
+// ShowWindow 从托盘恢复主界面。
+func (a *App) ShowWindow() {
+	if a.ctx == nil {
+		return
+	}
+	wruntime.WindowShow(a.ctx)
+	wruntime.WindowUnminimise(a.ctx)
+}
+
+// Quit 退出应用。
+func (a *App) Quit() {
+	if a.ctx == nil {
+		return
+	}
+	wruntime.Quit(a.ctx)
+}
+
+// runningTasks 返回当前占用推流槽位的任务数。
+// TaskManager 尚未接入绑定层（M3-7），此处先返回 0。
+func (a *App) runningTasks() int { return 0 }
 
 // Env 返回运行环境快照，供 UI 状态栏显示。
 func (a *App) Env() EnvInfo {
