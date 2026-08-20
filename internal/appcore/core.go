@@ -202,6 +202,7 @@ func (c *Core) newRunner(t config.Task) core.Runner {
 		FFmpegPath: tools.Resolved(c.dataDir, ffmpeg),
 		DataDir:    c.dataDir,
 		Record:     t.AutoRecord,
+		CookieFile: cfg.Settings.YouTubeCookieFile,
 	})
 }
 
@@ -479,8 +480,12 @@ func (c *Core) validateTask(t config.Task) error {
 		return fmt.Errorf("请填写直播源地址")
 	}
 	cfg := c.snapshot()
-	if _, ok := tools.Find(cfg, t.ToolID); !ok {
+	tool, ok := tools.Find(cfg, t.ToolID)
+	if !ok {
 		return fmt.Errorf("抓流内核 %q 不存在", t.ToolID)
+	}
+	if tools.NeedsYouTubeCookies(tool, t.SourceURL, cfg.Settings.YouTubeCookieFile) {
+		return fmt.Errorf("%s", tools.YouTubeCookieHint())
 	}
 	if t.RecordToolID != "" {
 		if _, ok := tools.Find(cfg, t.RecordToolID); !ok {
@@ -639,7 +644,29 @@ func (c *Core) DeleteTask(id string) error {
 }
 
 // StartTask 手动开播。
-func (c *Core) StartTask(id string) error { return c.mgr.Start(id) }
+func (c *Core) StartTask(id string) error {
+	// 配置可能是手改的，cookie 文件也可能事后被删，开播前再确认一次。
+	// 让任务起来后卡在一句看不懂的 yt-dlp 报错上，比直接拦下来糟糕得多。
+	if err := c.checkYouTube(id); err != nil {
+		return err
+	}
+	return c.mgr.Start(id)
+}
+
+// checkYouTube 在启动前确认 yt-dlp 抓 YouTube 的前提已满足。
+func (c *Core) checkYouTube(id string) error {
+	cfg := c.snapshot()
+	for _, t := range cfg.Tasks {
+		if t.ID != id {
+			continue
+		}
+		tool, ok := tools.Find(cfg, t.ToolID)
+		if ok && tools.NeedsYouTubeCookies(tool, t.SourceURL, cfg.Settings.YouTubeCookieFile) {
+			return fmt.Errorf("%s", tools.YouTubeCookieHint())
+		}
+	}
+	return nil
+}
 
 // StopTask 停止任务。
 func (c *Core) StopTask(id string) error { return c.mgr.Stop(id) }

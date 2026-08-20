@@ -27,6 +27,8 @@ export function Env():Promise<main.EnvInfo>;
 
 export function MinimiseWindow():Promise<void>;
 
+export function PickCookieFile():Promise<string>;
+
 export function PickDirectory():Promise<string>;
 
 export function PickExecutable():Promise<string>;

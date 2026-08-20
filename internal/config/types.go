@@ -17,6 +17,9 @@ type Settings struct {
 	Theme            string        `json:"theme"`
 	RecordDir        string        `json:"recordDir"`
 	ProbeIntervalSec int           `json:"probeIntervalSec"`
+	// YouTubeCookieFile 是 Netscape 格式的 cookies.txt 路径。
+	// yt-dlp 抓 YouTube 时通常会被要求人机验证，没有它取不到流。
+	YouTubeCookieFile string `json:"youtubeCookieFile"`
 }
 
 type Tool struct {

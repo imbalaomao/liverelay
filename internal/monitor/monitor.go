@@ -216,6 +216,11 @@ func (s *Service) runTool(ctx context.Context, tool config.Tool, url string) Res
 			Detail: fmt.Sprintf("内核 %s 没有配置开播探测参数，无法用于无人值守", tool.Name)}
 	}
 	args := pipeline.RenderTemplate(tool.ProbeTemplate, map[string]string{"url": url})
+	// 探测 YouTube 同样会撞人机验证，带上 cookie 才问得出开播状态
+	if cf := s.config().Settings.YouTubeCookieFile; cf != "" &&
+		tools.IsYtdlpFamily(tool) && tools.IsYouTubeURL(url) {
+		args = append(args, "--cookies", cf)
+	}
 	cctx, cancel := context.WithTimeout(ctx, probeTimeout)
 	defer cancel()
 	// 代理经由继承的环境变量生效，与推流链路走同一套设置

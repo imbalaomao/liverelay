@@ -200,6 +200,10 @@ async function pickRecordDir() {
   const d = await run(() => api.pickDirectory())
   if (d) settings.value.recordDir = d
 }
+async function pickCookieFile() {
+  const f = await run(() => api.pickCookieFile())
+  if (f) settings.value.youtubeCookieFile = f
+}
 async function saveCookie(c) {
   weiboBusy.value = true
   const v = await run(() => api.saveWeiboCookie(c), '微博 Cookie 已验证并保存')
@@ -290,7 +294,7 @@ const NAV = [
 
       <SettingsView v-else-if="view === 'settings' && settings" :settings="settings" :weibo="weibo"
                     :env="env" :weibo-busy="weiboBusy"
-                    @save="saveSettings" @pick-dir="pickRecordDir"
+                    @save="saveSettings" @pick-dir="pickRecordDir" @pick-cookie="pickCookieFile"
                     @save-cookie="saveCookie" @clear-cookie="clearCookie" @check-cookie="checkCookie" />
     </main>
 

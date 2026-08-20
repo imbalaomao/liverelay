@@ -167,6 +167,7 @@ export namespace config {
 	    theme: string;
 	    recordDir: string;
 	    probeIntervalSec: number;
+	    youtubeCookieFile: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new Settings(source);
@@ -181,6 +182,7 @@ export namespace config {
 	        this.theme = source["theme"];
 	        this.recordDir = source["recordDir"];
 	        this.probeIntervalSec = source["probeIntervalSec"];
+	        this.youtubeCookieFile = source["youtubeCookieFile"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {

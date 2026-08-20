@@ -46,6 +46,10 @@ export function MinimiseWindow() {
   return window['go']['main']['App']['MinimiseWindow']();
 }
 
+export function PickCookieFile() {
+  return window['go']['main']['App']['PickCookieFile']();
+}
+
 export function PickDirectory() {
   return window['go']['main']['App']['PickDirectory']();
 }

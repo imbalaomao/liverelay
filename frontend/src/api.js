@@ -35,6 +35,7 @@ export const api = {
   upgradeTool: (id) => App.UpgradeTool(id),
   pickExecutable: () => App.PickExecutable(),
   pickDirectory: () => App.PickDirectory(),
+  pickCookieFile: () => App.PickCookieFile(),
 
   settings: () => App.Settings(),
   saveSettings: (s) => App.SaveSettings(s),

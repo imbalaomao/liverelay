@@ -14,6 +14,7 @@ import (
 
 	"github.com/imbalaomao/liverelay/internal/config"
 	"github.com/imbalaomao/liverelay/internal/core"
+	"github.com/imbalaomao/liverelay/internal/tools"
 )
 
 // Options 装配一条直通管道所需的全部输入。
@@ -24,6 +25,9 @@ type Options struct {
 	DataDir    string
 	ProxyURL   string // 渲染好的代理 URL（如 http://127.0.0.1:7890），空表示无代理
 	Record     bool   // 本次运行是否录制（手动按钮或 AutoRecord 触发）
+	// CookieFile 是 Netscape 格式的 YouTube cookies.txt，仅在 yt-dlp 抓
+	// YouTube 时注入——那种组合几乎必然撞上人机验证。
+	CookieFile string
 }
 
 func buildFetchArgs(o Options) ([]string, error) {
@@ -34,6 +38,11 @@ func buildFetchArgs(o Options) ([]string, error) {
 		"outdir":  filepath.Join(o.DataDir, "recordings", SanitizeName(o.Task.Name)),
 	}
 	args := RenderTemplate(o.FetchTool.ArgTemplate, vars)
+	// 只在确实需要时注入：streamlink 不认这个参数，而给无关站点带上
+	// YouTube 的登录态更是不该发生的事
+	if o.CookieFile != "" && tools.IsYtdlpFamily(o.FetchTool) && tools.IsYouTubeURL(o.Task.SourceURL) {
+		args = append(args, "--cookies", o.CookieFile)
+	}
 	if !o.FetchTool.Builtin && strings.TrimSpace(o.Task.CustomArgs) != "" {
 		extra, err := Tokenize(o.Task.CustomArgs)
 		if err != nil {

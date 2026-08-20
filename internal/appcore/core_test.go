@@ -462,3 +462,83 @@ func TestAddTaskDropsFormOnlyField(t *testing.T) {
 		t.Errorf("配置文件里出现了表单专用字段:\n%s", raw)
 	}
 }
+
+// ---------- YouTube 人机验证拦截 ----------
+
+func TestAddYouTubeTaskWithYtdlpIsRejected(t *testing.T) {
+	// yt-dlp 抓 YouTube 会被要求人机验证，没 cookie 就取不到流。
+	// 与其让任务启动后卡在一个看不懂的报错上，不如建任务时就说清楚
+	c := newTestCore(t)
+	_, err := c.AddTask(config.Task{
+		Name: "油管直播", SourceURL: "https://www.youtube.com/watch?v=abc", ToolID: "yt-dlp",
+		Targets: []config.Target{{Proto: "rtmp", URL: "rtmp://a"}},
+	})
+	if err == nil {
+		t.Fatal("应拦下来并提示需要 YouTube Cookies")
+	}
+	for _, want := range []string{"YouTube", "Cookie", "Netscape"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("提示应说明该怎么做，缺少 %q：%v", want, err)
+		}
+	}
+}
+
+func TestStreamlinkYouTubeTaskIsAllowed(t *testing.T) {
+	// streamlink 走另一套解析，不该被这条规则误伤
+	c := newTestCore(t)
+	if _, err := c.AddTask(config.Task{
+		Name: "油管直播", SourceURL: "https://www.youtube.com/watch?v=abc", ToolID: "streamlink",
+		Targets: []config.Target{{Proto: "rtmp", URL: "rtmp://a"}},
+	}); err != nil {
+		t.Errorf("streamlink 抓 YouTube 不应被拦: %v", err)
+	}
+}
+
+func TestYtdlpNonYouTubeTaskIsAllowed(t *testing.T) {
+	c := newTestCore(t)
+	if _, err := c.AddTask(config.Task{
+		Name: "推特直播", SourceURL: "https://www.twitch.tv/someone", ToolID: "yt-dlp",
+		Targets: []config.Target{{Proto: "rtmp", URL: "rtmp://a"}},
+	}); err != nil {
+		t.Errorf("yt-dlp 抓非 YouTube 不应被拦: %v", err)
+	}
+}
+
+func TestYouTubeTaskAllowedOnceCookieFileSet(t *testing.T) {
+	c := newTestCore(t)
+	s := c.Settings()
+	s.YouTubeCookieFile = `D:\cookies.txt`
+	if err := c.SaveSettings(s); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.AddTask(config.Task{
+		Name: "油管直播", SourceURL: "https://youtu.be/abc", ToolID: "yt-dlp",
+		Targets: []config.Target{{Proto: "rtmp", URL: "rtmp://a"}},
+	}); err != nil {
+		t.Errorf("配了 cookie 文件后不应再拦: %v", err)
+	}
+}
+
+func TestStartYouTubeTaskWithoutCookieIsRejected(t *testing.T) {
+	// 配置可能是手改的，或 cookie 文件事后被删；开播前必须再兜一次
+	c := newTestCore(t)
+	got, err := c.AddTask(config.Task{
+		Name: "先合法", SourceURL: "https://www.twitch.tv/x", ToolID: "yt-dlp",
+		Targets: []config.Target{{Proto: "rtmp", URL: "rtmp://a"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 绕过校验直接把源地址改成 YouTube，模拟手改配置
+	c.mu.Lock()
+	next := *c.cfg
+	next.Tasks = append([]config.Task(nil), c.cfg.Tasks...)
+	next.Tasks[0].SourceURL = "https://www.youtube.com/watch?v=abc"
+	c.cfg = &next
+	c.mu.Unlock()
+	c.mgr.SetConfig(c.snapshot())
+
+	if err := c.StartTask(got.ID); err == nil {
+		t.Error("开播前应再检查一次并拦下")
+	}
+}

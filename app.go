@@ -310,6 +310,20 @@ func (a *App) PickExecutable() (string, error) {
 	})
 }
 
+// PickCookieFile 弹出文件选择框，用于选 Netscape 格式的 cookies.txt。
+func (a *App) PickCookieFile() (string, error) {
+	if a.ctx == nil {
+		return "", nil
+	}
+	return wruntime.OpenFileDialog(a.ctx, wruntime.OpenDialogOptions{
+		Title: "选择 YouTube cookies.txt",
+		Filters: []wruntime.FileFilter{
+			{DisplayName: "Cookies 文件 (*.txt)", Pattern: "*.txt"},
+			{DisplayName: "全部文件", Pattern: "*.*"},
+		},
+	})
+}
+
 // PickDirectory 弹出目录选择框，用于选录制目录。
 func (a *App) PickDirectory() (string, error) {
 	if a.ctx == nil {

@@ -9,7 +9,7 @@ const props = defineProps({
   weiboBusy: { type: Boolean, default: false },
 })
 const emit = defineEmits([
-  'save', 'pick-dir', 'save-cookie', 'clear-cookie', 'check-cookie',
+  'save', 'pick-dir', 'pick-cookie', 'save-cookie', 'clear-cookie', 'check-cookie',
 ])
 
 const cookie = ref('')
@@ -96,6 +96,25 @@ function submitCookie() {
         <p class="text-[11px] text-mute mt-3">
           目标机配置有限时把上限调小些；探测间隔越短，后台起的进程越频繁。
         </p>
+      </div>
+
+      <!-- YouTube -->
+      <div class="bg-ink-800 border border-line rounded-2xl p-5">
+        <h2 class="text-sm font-semibold mb-3">YouTube Cookies</h2>
+        <p class="text-[11px] text-mute mb-3">
+          yt-dlp 抓取 YouTube 时通常会被要求人机验证。用浏览器扩展（如 Get cookies.txt）
+          把已登录的 youtube.com 站点 Cookie 导出为 Netscape 格式的 cookies.txt，在此指定。
+          未指定时，用 yt-dlp 抓 YouTube 的任务会被拦下并提示。
+        </p>
+        <div class="flex items-center gap-3 text-sm">
+          <input v-model="settings.youtubeCookieFile" placeholder="D:\cookies.txt"
+                 class="flex-1 bg-ink-900 border border-line rounded-xl px-3 py-2 fade text-xs" />
+          <button class="px-3 py-2 rounded-xl bg-ink-700 hover:bg-ink-600 fade text-xs"
+                  @click="emit('pick-cookie')">浏览</button>
+          <button v-if="settings.youtubeCookieFile"
+                  class="px-3 py-2 rounded-xl bg-ink-700 hover:bg-bad/25 hover:text-bad fade text-xs"
+                  @click="settings.youtubeCookieFile = ''">清除</button>
+        </div>
       </div>
 
       <!-- 微博直播 -->

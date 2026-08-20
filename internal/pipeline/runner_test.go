@@ -143,3 +143,56 @@ func TestTailKeepsValidUTF8(t *testing.T) {
 		t.Fatalf("tail 输出应不超过 200 字节，得到 %d", len(got))
 	}
 }
+
+// ---------- YouTube cookie 注入 ----------
+
+func TestFetchArgsInjectCookieFile(t *testing.T) {
+	// yt-dlp 抓 YouTube 必须带上 --cookies，否则会撞人机验证
+	args, err := buildFetchArgs(Options{
+		Task: config.Task{SourceURL: "https://youtu.be/abc", Quality: "best"},
+		FetchTool: config.Tool{ID: "yt-dlp", Name: "yt-dlp", Builtin: true,
+			ArgTemplate: []string{"-o", "-", "{url}"}},
+		CookieFile: `D:\cookies.txt`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(args, " ")
+	if !strings.Contains(joined, "--cookies") || !strings.Contains(joined, `D:\cookies.txt`) {
+		t.Errorf("未注入 cookie 参数: %v", args)
+	}
+}
+
+func TestFetchArgsSkipCookieForNonYouTube(t *testing.T) {
+	// 非 YouTube 源不该白白带上 cookie：那会把用户的登录态发给无关站点
+	args, _ := buildFetchArgs(Options{
+		Task:       config.Task{SourceURL: "https://www.twitch.tv/x"},
+		FetchTool:  config.Tool{ID: "yt-dlp", Name: "yt-dlp", ArgTemplate: []string{"{url}"}},
+		CookieFile: `D:\cookies.txt`,
+	})
+	if strings.Contains(strings.Join(args, " "), "--cookies") {
+		t.Errorf("非 YouTube 源不应带 cookie: %v", args)
+	}
+}
+
+func TestFetchArgsSkipCookieForNonYtdlp(t *testing.T) {
+	// streamlink 不认 --cookies 这个参数，塞进去只会让它启动失败
+	args, _ := buildFetchArgs(Options{
+		Task:       config.Task{SourceURL: "https://youtu.be/abc"},
+		FetchTool:  config.Tool{ID: "streamlink", Name: "streamlink", ArgTemplate: []string{"{url}"}},
+		CookieFile: `D:\cookies.txt`,
+	})
+	if strings.Contains(strings.Join(args, " "), "--cookies") {
+		t.Errorf("streamlink 不该带 --cookies: %v", args)
+	}
+}
+
+func TestFetchArgsWithoutCookieFile(t *testing.T) {
+	args, _ := buildFetchArgs(Options{
+		Task:      config.Task{SourceURL: "https://youtu.be/abc"},
+		FetchTool: config.Tool{ID: "yt-dlp", Name: "yt-dlp", ArgTemplate: []string{"{url}"}},
+	})
+	if strings.Contains(strings.Join(args, " "), "--cookies") {
+		t.Errorf("没配 cookie 文件时不该出现该参数: %v", args)
+	}
+}
