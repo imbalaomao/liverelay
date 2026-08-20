@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self' https://cdn.tailwindcss.com; script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com; style-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com; img-src 'self' data:">
+<title>LiveRelay 原型</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+tailwind.config = {
+  darkMode: 'class',
+  theme: { extend: { colors: {
+    ink: { 950:'#0b0d12', 900:'#0f1218', 800:'#161a23', 700:'#1e2430', 600:'#2a3242' },
+    line: '#232a38',
+    acc: { DEFAULT:'#34d399', dim:'#10b981' },
+    warn: '#fbbf24', bad:'#f87171', mute:'#8b94a7'
+  } } }
+}
+</script>
+<style>
+  body { font-family: "Segoe UI", "Microsoft YaHei", system-ui, sans-serif; }
+  .glass { background: rgba(22,26,35,.72); backdrop-filter: blur(14px); }
+  .dot { width:8px; height:8px; border-radius:9999px; display:inline-block; }
+  .pulse { animation: p 1.6s ease-in-out infinite; }
+  @keyframes p { 0%,100%{opacity:1} 50%{opacity:.35} }
+  .fade { transition: all .18s ease; }
+  .card { transition: transform .18s ease, border-color .18s ease; }
+  .card:hover { transform: translateY(-1px); border-color:#2f3a4f; }
+  input,select,textarea { outline:none; }
+  input:focus,select:focus,textarea:focus { border-color:#34d399 !important; }
+  ::-webkit-scrollbar { width:8px; } ::-webkit-scrollbar-thumb { background:#2a3242; border-radius:8px; }
+</style>
+</head>
+<body class="bg-ink-950 text-slate-200 h-screen overflow-hidden select-none">
+
+<div class="flex h-full">
+  <!-- 侧边栏 -->
+  <aside class="w-52 shrink-0 glass border-r border-line flex flex-col">
+    <div class="px-5 pt-5 pb-4 flex items-center gap-2.5">
+      <div class="w-8 h-8 rounded-xl bg-acc/15 border border-acc/30 flex items-center justify-center text-acc font-bold">◤</div>
+      <div>
+        <div class="font-semibold tracking-wide">LiveRelay</div>
+        <div class="text-[10px] text-mute">自动直播转发 · 原型</div>
+      </div>
+    </div>
+    <nav class="px-3 space-y-1 mt-2" id="nav">
+      <button data-view="tasks"   class="navbtn w-full text-left px-3.5 py-2.5 rounded-xl fade bg-acc/10 text-acc border border-acc/20">▣&nbsp;&nbsp;任务</button>
+      <button data-view="kernels" class="navbtn w-full text-left px-3.5 py-2.5 rounded-xl fade text-slate-300 hover:bg-ink-700 border border-transparent">◈&nbsp;&nbsp;内核</button>
+      <button data-view="settings" class="navbtn w-full text-left px-3.5 py-2.5 rounded-xl fade text-slate-300 hover:bg-ink-700 border border-transparent">⚙&nbsp;&nbsp;设置</button>
+    </nav>
+    <div class="mt-auto px-4 py-4 border-t border-line text-[11px] text-mute space-y-1">
+      <div class="flex justify-between"><span>CPU</span><span class="text-slate-300">2.1%</span></div>
+      <div class="flex justify-between"><span>内存</span><span class="text-slate-300">84 MB</span></div>
+      <div class="flex justify-between"><span>模式</span><span class="text-acc">便携</span></div>
+    </div>
+  </aside>
+
+  <!-- 主区域 -->
+  <main class="flex-1 flex flex-col min-w-0">
+    <!-- 自绘标题栏 -->
+    <header class="h-11 shrink-0 flex items-center justify-end gap-1 px-3 border-b border-line bg-ink-900/60">
+      <button class="w-9 h-7 rounded hover:bg-ink-700 text-mute fade">─</button>
+      <button class="w-9 h-7 rounded hover:bg-ink-700 text-mute fade">▢</button>
+      <button class="w-9 h-7 rounded hover:bg-bad/80 hover:text-white text-mute fade" title="关闭到托盘">✕</button>
+    </header>
+
+    <!-- 任务页 -->
+    <section id="view-tasks" class="flex-1 overflow-y-auto p-6">
+      <div class="flex items-center justify-between mb-5">
+        <div>
+          <h1 class="text-lg font-semibold">推流任务</h1>
+          <p class="text-xs text-mute mt-0.5">2 个任务 · 1 路推流中</p>
+        </div>
+        <button onclick="openModal()" class="px-4 py-2 rounded-xl bg-acc text-ink-950 text-sm font-semibold hover:bg-acc-dim fade">＋ 新建任务</button>
+      </div>
+
+      <div class="space-y-3 max-w-3xl">
+        <!-- 运行中卡片 -->
+        <div class="card bg-ink-800 border border-acc/25 rounded-2xl p-4">
+          <div class="flex items-center gap-3">
+            <span class="dot bg-acc pulse"></span>
+            <span class="font-medium">XX直播</span>
+            <span class="text-xs text-mute">→</span>
+            <span class="text-xs px-2 py-0.5 rounded-md bg-ink-700 text-slate-300">B站</span>
+            <span class="text-xs px-2 py-0.5 rounded-md bg-ink-700 text-slate-300">微博</span>
+            <div class="ml-auto flex gap-1.5">
+              <button class="px-2.5 py-1.5 rounded-lg text-xs bg-ink-700 hover:bg-ink-600 fade" title="停止录制">⏺ 录制中</button>
+              <button class="px-2.5 py-1.5 rounded-lg text-xs bg-ink-700 hover:bg-ink-600 fade">■ 停止</button>
+              <button class="px-2.5 py-1.5 rounded-lg text-xs bg-ink-700 hover:bg-ink-600 fade">✎</button>
+            </div>
+          </div>
+          <div class="mt-3 flex gap-4 text-[11px] text-mute">
+            <span>画质 <b class="text-slate-300 font-normal">1080p</b></span>
+            <span>码率 <b class="text-acc font-normal">4.2 Mbps</b></span>
+            <span>时长 <b class="text-slate-300 font-normal">02:13:40</b></span>
+            <span>重连 <b class="text-slate-300 font-normal">0 次</b></span>
+            <span>工具 <b class="text-slate-300 font-normal">streamlink</b></span>
+          </div>
+        </div>
+
+        <!-- 无人值守卡片 -->
+        <div class="card bg-ink-800 border border-line rounded-2xl p-4">
+          <div class="flex items-center gap-3">
+            <span class="dot bg-warn pulse"></span>
+            <span class="font-medium">YY直播</span>
+            <span class="text-xs px-2 py-0.5 rounded-md bg-warn/10 text-warn border border-warn/20">无人值守 · 探测中</span>
+            <span class="text-xs text-mute">→</span>
+            <span class="text-xs px-2 py-0.5 rounded-md bg-ink-700 text-slate-300">B站</span>
+            <div class="ml-auto flex gap-1.5">
+              <button class="px-2.5 py-1.5 rounded-lg text-xs bg-acc/15 text-acc border border-acc/25 hover:bg-acc/25 fade">▶ 立即开播</button>
+              <button class="px-2.5 py-1.5 rounded-lg text-xs bg-ink-700 hover:bg-ink-600 fade">✎</button>
+            </div>
+          </div>
+          <div class="mt-3 flex gap-4 text-[11px] text-mute">
+            <span>下次探测 <b class="text-slate-300 font-normal">38s</b></span>
+            <span>上次结果 <b class="text-slate-300 font-normal">未开播</b></span>
+            <span>自动录制 <b class="text-slate-300 font-normal">开</b></span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 内核页 -->
+    <section id="view-kernels" class="flex-1 overflow-y-auto p-6 hidden">
+      <div class="flex items-center justify-between mb-5">
+        <div>
+          <h1 class="text-lg font-semibold">内核管理</h1>
+          <p class="text-xs text-mute mt-0.5">内置内核不可删除，可覆盖为本地二进制</p>
+        </div>
+        <button class="px-4 py-2 rounded-xl bg-ink-700 text-sm hover:bg-ink-600 fade">＋ 添加自定义内核</button>
+      </div>
+      <div class="space-y-3 max-w-3xl" id="kernel-list"></div>
+    </section>
+
+    <!-- 设置页 -->
+    <section id="view-settings" class="flex-1 overflow-y-auto p-6 hidden">
+      <h1 class="text-lg font-semibold mb-5">设置</h1>
+      <div class="space-y-4 max-w-2xl">
+        <div class="bg-ink-800 border border-line rounded-2xl p-5">
+          <div class="flex items-center justify-between mb-4">
+            <h2 class="text-sm font-semibold">网络代理</h2>
+            <button class="text-xs px-3 py-1.5 rounded-lg bg-ink-700 hover:bg-ink-600 fade">测试连接</button>
+          </div>
+          <div class="grid grid-cols-4 gap-3 text-sm">
+            <select class="bg-ink-900 border border-line rounded-xl px-3 py-2 fade"><option>HTTP</option><option>SOCKS5</option></select>
+            <input placeholder="主机 127.0.0.1" class="col-span-2 bg-ink-900 border border-line rounded-xl px-3 py-2 fade">
+            <input placeholder="端口 7890" class="bg-ink-900 border border-line rounded-xl px-3 py-2 fade">
+          </div>
+          <p class="text-[11px] text-mute mt-3">代理将传递给 streamlink / yt-dlp / ffmpeg / 更新器</p>
+        </div>
+
+        <div class="bg-ink-800 border border-line rounded-2xl p-5 space-y-4" id="toggles"></div>
+
+        <div class="bg-ink-800 border border-line rounded-2xl p-5">
+          <h2 class="text-sm font-semibold mb-3">存储</h2>
+          <div class="flex items-center gap-3 text-sm">
+            <span class="text-mute shrink-0">录制目录</span>
+            <input value="D:\Soft-Dev\LiveRelay\data\recordings" class="flex-1 bg-ink-900 border border-line rounded-xl px-3 py-2 fade text-xs">
+            <button class="px-3 py-2 rounded-xl bg-ink-700 hover:bg-ink-600 fade text-xs">浏览</button>
+          </div>
+          <div class="flex items-center gap-3 text-sm mt-3">
+            <span class="text-mute shrink-0">运行模式</span>
+            <span class="text-xs px-2 py-1 rounded-md bg-acc/10 text-acc border border-acc/20">便携模式（data/ 目录）</span>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<!-- 新建任务弹窗 -->
+<div id="modal" class="fixed inset-0 bg-black/60 backdrop-blur-sm hidden items-center justify-center z-50">
+  <div class="w-[560px] max-h-[86vh] overflow-y-auto bg-ink-800 border border-line rounded-2xl p-6 shadow-2xl">
+    <div class="flex items-center justify-between mb-5">
+      <h2 class="font-semibold">新建任务</h2>
+      <button onclick="closeModal()" class="text-mute hover:text-white fade">✕</button>
+    </div>
+    <div class="space-y-4 text-sm">
+      <div class="grid grid-cols-2 gap-3">
+        <label class="space-y-1.5 block"><span class="text-xs text-mute">任务名称</span>
+          <input id="f-name" value="XX直播" class="w-full bg-ink-900 border border-line rounded-xl px-3 py-2 fade"></label>
+        <label class="space-y-1.5 block"><span class="text-xs text-mute">抓流内核</span>
+          <select id="f-tool" onchange="renderPreview()" class="w-full bg-ink-900 border border-line rounded-xl px-3 py-2 fade">
+            <option value="streamlink">streamlink（内置）</option>
+            <option value="yt-dlp">yt-dlp（内置）</option>
+            <option value="drm">streamlink-drm（自定义）</option>
+          </select></label>
+      </div>
+      <label class="space-y-1.5 block"><span class="text-xs text-mute">直播源 URL</span>
+        <input id="f-url" value="https://live.example.com/room/123" oninput="renderPreview()" class="w-full bg-ink-900 border border-line rounded-xl px-3 py-2 fade"></label>
+      <div class="grid grid-cols-2 gap-3">
+        <label class="space-y-1.5 block"><span class="text-xs text-mute">画质</span>
+          <select class="w-full bg-ink-900 border border-line rounded-xl px-3 py-2 fade"><option>best</option><option>1080p</option><option>720p</option><option>worst</option></select></label>
+        <label class="space-y-1.5 block"><span class="text-xs text-mute">探测间隔（无人值守）</span>
+          <select class="w-full bg-ink-900 border border-line rounded-xl px-3 py-2 fade"><option>60s</option><option>30s</option><option>120s</option><option>300s</option></select></label>
+      </div>
+      <div class="space-y-2">
+        <span class="text-xs text-mute">推流目标（可多条）</span>
+        <div class="flex gap-2">
+          <select class="bg-ink-900 border border-line rounded-xl px-2 py-2 fade w-24"><option>RTMP</option><option>SRT</option><option>UDP</option><option>HLS</option></select>
+          <input value="rtmp://live-push.bilivideo.com/live-bvc/" class="flex-1 bg-ink-900 border border-line rounded-xl px-3 py-2 fade text-xs">
+          <input type="password" value="secret_key_***" class="w-36 bg-ink-900 border border-line rounded-xl px-3 py-2 fade text-xs" placeholder="密钥">
+        </div>
+        <button class="text-xs text-acc hover:underline">＋ 添加目标</button>
+      </div>
+      <div id="custom-args" class="space-y-1.5 hidden">
+        <span class="text-xs text-mute">自定义参数（仅自定义内核，逐字传递）</span>
+        <textarea id="f-args" rows="2" oninput="renderPreview()" class="w-full bg-ink-900 border border-line rounded-xl px-3 py-2 fade text-xs font-mono" placeholder='--decryption-key "xxxx" --http-header "Referer=..."'></textarea>
+      </div>
+      <div class="flex gap-5 text-xs text-mute">
+        <label class="flex items-center gap-2 cursor-pointer"><input type="checkbox" class="accent-emerald-400"> 无人值守（开播自动推流）</label>
+        <label class="flex items-center gap-2 cursor-pointer"><input type="checkbox" checked class="accent-emerald-400"> 自动录制</label>
+      </div>
+      <div class="bg-ink-950 border border-line rounded-xl p-3">
+        <div class="text-[10px] text-mute mb-1">完整命令预览（密钥已脱敏）</div>
+        <code id="preview" class="text-[11px] text-acc/90 break-all font-mono"></code>
+      </div>
+      <div class="flex justify-end gap-2 pt-1">
+        <button onclick="closeModal()" class="px-4 py-2 rounded-xl bg-ink-700 hover:bg-ink-600 fade text-sm">取消</button>
+        <button onclick="closeModal()" class="px-4 py-2 rounded-xl bg-acc text-ink-950 font-semibold hover:bg-acc-dim fade text-sm">创建任务</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// 视图切换
+const nav = document.getElementById('nav');
+nav.addEventListener('click', e => {
+  const btn = e.target.closest('.navbtn'); if (!btn) return;
+  document.querySelectorAll('.navbtn').forEach(b => {
+    b.className = 'navbtn w-full text-left px-3.5 py-2.5 rounded-xl fade text-slate-300 hover:bg-ink-700 border border-transparent';
+  });
+  btn.className = 'navbtn w-full text-left px-3.5 py-2.5 rounded-xl fade bg-acc/10 text-acc border border-acc/20';
+  ['tasks','kernels','settings'].forEach(v => document.getElementById('view-'+v).classList.toggle('hidden', v !== btn.dataset.view));
+});
+
+// 内核页 mock 数据
+const kernels = [
+  { name:'streamlink', ver:'7.1.3', src:'内置', role:'抓流', path:'data/tools/streamlink.exe', ok:true,  caps:'twitch · youtube · hls · dash · --http-proxy 等 42 项参数', builtin:true },
+  { name:'yt-dlp',     ver:'2026.07.30', src:'内置', role:'抓流', path:'data/tools/yt-dlp.exe', ok:true, caps:'1800+ 站点 · --proxy · --dump-json · --cookies 等', builtin:true },
+  { name:'ffmpeg',     ver:'N-125185', src:'内置', role:'抓流/录制', path:'系统 PATH', ok:true, caps:'flv · mpegts · hls · segment · srt 等', builtin:true },
+  { name:'streamlink-drm', ver:'7.1.3+drm', src:'自定义', role:'抓流', path:'D:\\tools\\streamlink-drm.exe', ok:true, caps:'--decryption-key · drm 插件（探测自 --help）', builtin:false },
+  { name:'N_m3u8DL-RE', ver:'0.5.1', src:'自定义', role:'录制', path:'D:\\tools\\N_m3u8DL-RE.exe', ok:true, caps:'--key · --save-dir · 自动合并 mp4（探测自 --help）', builtin:false },
+];
+document.getElementById('kernel-list').innerHTML = kernels.map(k => `
+  <div class="card bg-ink-800 border border-line rounded-2xl p-4 flex items-center gap-4">
+    <div class="w-9 h-9 rounded-xl bg-ink-700 flex items-center justify-center text-mute">◈</div>
+    <div class="min-w-0 flex-1">
+      <div class="flex items-center gap-2">
+        <span class="font-medium text-sm">${k.name}</span>
+        <span class="text-[10px] px-1.5 py-0.5 rounded bg-acc/10 text-acc border border-acc/20 font-mono">${k.ver}</span>
+        <span class="text-[10px] px-1.5 py-0.5 rounded bg-ink-700 text-mute">${k.src}</span>
+        <span class="text-[10px] px-1.5 py-0.5 rounded bg-ink-700 text-mute">${k.role}</span>
+      </div>
+      <div class="text-[11px] text-mute mt-1 truncate">${k.path}</div>
+      <div class="text-[11px] text-mute/80 mt-0.5 truncate">功能探测：${k.caps}</div>
+    </div>
+    <div class="flex gap-1.5 shrink-0">
+      ${k.builtin
+        ? '<button class="px-2.5 py-1.5 rounded-lg text-xs bg-ink-700 hover:bg-ink-600 fade">检查更新</button><button class="px-2.5 py-1.5 rounded-lg text-xs bg-ink-700 hover:bg-ink-600 fade">本地二进制</button>'
+        : '<button class="px-2.5 py-1.5 rounded-lg text-xs bg-ink-700 hover:bg-ink-600 fade">重新探测</button><button class="px-2.5 py-1.5 rounded-lg text-xs bg-ink-700 hover:bg-ink-600 fade">✎</button><button class="px-2.5 py-1.5 rounded-lg text-xs bg-bad/15 text-bad border border-bad/25 hover:bg-bad/25 fade">删除</button>'}
+    </div>
+  </div>`).join('');
+
+// 设置页开关
+const toggles = [
+  ['关闭到托盘', '关闭窗口仅隐藏 UI，推流继续运行', true],
+  ['推流时保持电脑不睡眠', '存在运行中任务时阻止系统睡眠', true],
+  ['开机自启', '登录 Windows 后自动启动（托盘）', false],
+  ['深色主题', '关闭后切换为浅色主题', true],
+];
+document.getElementById('toggles').innerHTML = toggles.map(([t, d, on]) => `
+  <label class="flex items-center justify-between cursor-pointer">
+    <div><div class="text-sm">${t}</div><div class="text-[11px] text-mute mt-0.5">${d}</div></div>
+    <div onclick="this.classList.toggle('on');this.firstElementChild.classList.toggle('translate-x-5')"
+         class="w-10 h-5.5 h-6 rounded-full p-0.5 fade ${on?'bg-acc':'bg-ink-600'}">
+      <div class="w-5 h-5 rounded-full bg-white shadow fade ${on?'translate-x-4':''}"></div>
+    </div>
+  </label>`).join('');
+
+// 弹窗 + 命令预览
+function openModal(){ document.getElementById('modal').classList.replace('hidden','flex'); renderPreview(); }
+function closeModal(){ document.getElementById('modal').classList.replace('flex','hidden'); }
+function renderPreview(){
+  const tool = document.getElementById('f-tool');
+  const url = document.getElementById('f-url').value;
+  const isCustom = tool.value === 'drm';
+  document.getElementById('custom-args').classList.toggle('hidden', !isCustom);
+  const extra = isCustom ? (' ' + (document.getElementById('f-args').value || '')) : '';
+  document.getElementById('preview').textContent =
+    `${tool.options[tool.selectedIndex].text.split('（')[0]} "${url}" best -O${extra}  |  ffmpeg -i pipe:0 -c copy -f flv rtmp://live-push.***/***`;
+}
+document.getElementById('modal').addEventListener('click', e => { if (e.target.id === 'modal') closeModal(); });
+</script>
+</body>
+</html>
