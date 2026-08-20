@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <!-- XSS 红线：仅允许加载打包内资源，禁止远程脚本与 eval。
+       script-src 不含 'unsafe-inline'，模板注入无法转为脚本执行；
+       style-src 保留 'unsafe-inline' 是 Vue 的 :style 绑定与 Tailwind CSS 变量所必需。
+       %CSP_DEV_CONNECT% 仅在 wails dev 下被替换为 localhost 白名单，生产构建为空。 -->
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'%CSP_DEV_CONNECT%; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'" />
+  <title>LiveRelay</title>
+</head>
+<body>
+  <div id="app"></div>
+  <script src="./src/main.js" type="module"></script>
+</body>
+</html>

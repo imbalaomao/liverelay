@@ -1,14 +1,28 @@
-# 数据与二进制（用户运行时产生，或体积过大）
+# Go
+*.exe
+*.test
+*.out
+*.log
+
+# Wails 构建产物（build/ 下的图标与清单需要入库，仅忽略产物目录）
+build/bin/
+
+# 前端
+node_modules/
+# dist 由 wails build 生成，但 go:embed 要求目录存在，故保留占位文件
+frontend/dist/*
+!frontend/dist/.gitkeep
+
+# 运行时数据（便携模式数据根、用户放置的内核二进制）
 data/
 tools/
 recordings/
 logs/
 cache/
-*.exe
-*.log
-# 构建产物
-build/
-/dist/
+
 # 编辑器
 .idea/
 .vscode/
+
+# Wails 构建缓存（package.json 的哈希，用于决定是否重跑 npm install）
+frontend/package.json.md5
