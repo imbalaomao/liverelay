@@ -102,11 +102,14 @@ func MakePortable(exeDir, srcRoot string) (string, error) {
 }
 
 func copyFile(src, dst string) error {
+	// #nosec G304 -- src/dst 都由数据根拼常量文件名得到，数据根是用户为
+	// 自己这台机器选定的目录
 	in, err := os.Open(src)
 	if err != nil {
 		return err
 	}
 	defer in.Close()
+	// #nosec G304 -- 同上
 	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
 	if err != nil {
 		return err

@@ -293,6 +293,8 @@ func (u *Updater) download(ctx context.Context, rawURL, dst string, wantSHA *str
 		return fmt.Errorf("下载 %s 返回 %s", redactURL(rawURL), resp.Status)
 	}
 
+	// #nosec G304 -- dst 由本函数的调用方用 os.MkdirTemp 建的临时目录拼出，
+	// 不含任何外部可控片段
 	f, err := os.Create(dst)
 	if err != nil {
 		return err
@@ -334,6 +336,7 @@ func extractBinary(zipPath, binary, dst string) error {
 }
 
 func extractBinaryLimit(zipPath, binary, dst string, limit int64) (err error) {
+	// #nosec G304 -- zipPath 是我们刚下载到临时目录的文件
 	zr, err := zip.OpenReader(zipPath)
 	if err != nil {
 		return fmt.Errorf("打开压缩包失败: %w", err)
@@ -355,6 +358,7 @@ func extractBinaryLimit(zipPath, binary, dst string, limit int64) (err error) {
 		}
 		defer rc.Close()
 
+		// #nosec G304 -- dst 由调用方用 os.MkdirTemp 建的临时目录拼出
 		out, cerr := os.Create(dst)
 		if cerr != nil {
 			return cerr
@@ -421,14 +425,16 @@ func moveFile(src, dst string) error {
 	if err := os.Rename(src, dst); err == nil {
 		return nil
 	}
+	// #nosec G304 -- src 是本进程刚落地的暂存文件
 	in, err := os.Open(src)
 	if err != nil {
 		return err
 	}
 	defer in.Close()
 
-	// #nosec G302 -- 换入的是可执行文件，0600 不带执行位就跑不起来；
-	// 0700 已是"仅本用户可执行"的最小权限
+	// #nosec G302 G304 -- 换入的是可执行文件，0600 不带执行位就跑不起来，
+	// 0700 已是"仅本用户可执行"的最小权限；dst 由调用方在内核目录下拼出，
+	// 不含外部可控片段
 	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o700)
 	if err != nil {
 		return err

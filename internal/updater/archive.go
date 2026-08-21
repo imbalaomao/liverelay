@@ -93,6 +93,8 @@ func writeEntry(f *zip.File, dst string, remaining int64) (int64, error) {
 	if mode == 0 {
 		mode = 0o755
 	}
+	// #nosec G304 -- dst 由 safeRelPath 校验过：已拒绝路径穿越与绝对路径，
+	// 且一定落在调用方指定的解压根目录之下
 	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, mode)
 	if err != nil {
 		return 0, err

@@ -1,0 +1,37 @@
+version: 2
+
+updates:
+  # Go 依赖。Wails 是主框架，升级它可能牵动 WebView2 行为，
+  # 单独拎出来一条通知，别混在杂项里被顺手合掉。
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      wails:
+        patterns:
+          - github.com/wailsapp/*
+
+  - package-ecosystem: npm
+    directory: /frontend
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      # 前端依赖只有 vue/vite/tailwind 几个，同版本线的补丁一起升就行
+      frontend-minor:
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: "chore(ci)"

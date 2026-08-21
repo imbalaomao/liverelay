@@ -144,6 +144,7 @@ func (r *Runner) Start(ctx context.Context) error {
 	// 三重约束保证这不是命令注入面：可执行文件路径来自用户在界面上的显式选择；
 	// 参数以数组逐个传递、绝不拼接成命令行；全程不经 shell。
 	r.ff = exec.CommandContext(ctx, r.opts.FFmpegPath, ffArgs...)
+	// #nosec G204 -- 同上：路径来自用户选定的内核，参数走数组不经 shell
 	r.fetch = exec.CommandContext(ctx, r.opts.FetchTool.EffectivePath(), fetchArgs...)
 	if r.opts.ProxyURL != "" {
 		env := append(os.Environ(), "http_proxy="+r.opts.ProxyURL, "https_proxy="+r.opts.ProxyURL)

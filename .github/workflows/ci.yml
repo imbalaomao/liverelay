@@ -1,0 +1,112 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# 同一分支上新的推送会取消还在跑的旧任务。
+# 私有仓库的 Actions 额度有限，而 Windows runner 按 2 倍分钟数计费。
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  GO_VERSION: "1.26"
+  NODE_VERSION: "24"
+  WAILS_VERSION: v2.15.0
+
+jobs:
+  build-and-test:
+    # 必须用 Windows：DPAPI、SetThreadExecutionState、systray 都是 Windows API，
+    # 在别的平台上只会编到那份空实现，等于没测到真正会发布的代码。
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: go.sum
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: 缓存 wails CLI
+        id: cache-wails
+        uses: actions/cache@v4
+        with:
+          path: ~/go/bin/wails.exe
+          key: wails-${{ env.WAILS_VERSION }}-go${{ env.GO_VERSION }}
+
+      - name: 安装 wails CLI
+        if: steps.cache-wails.outputs.cache-hit != 'true'
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@${{ env.WAILS_VERSION }}
+
+      - name: 安装 ffmpeg
+        # 端到端测试拿 ffmpeg 当迷你 RTMP 服务器，没有它整条链路就只能跳过——
+        # 而那恰恰是最值得在 CI 上跑的一条用例
+        run: choco install ffmpeg --no-progress -y
+        shell: pwsh
+
+      - name: 构建
+        # 先构建：security_test.go 要检查 frontend/dist 里的 CSP 与产物内容，
+        # 没有产物它只会跳过，红线就等于没验
+        run: wails build -clean
+        shell: bash
+
+      - name: 格式与静态检查
+        shell: bash
+        run: |
+          test -z "$(gofmt -l .)" || { echo "以下文件未格式化："; gofmt -l .; exit 1; }
+          go vet ./...
+
+      - name: 单元测试
+        run: go test ./... -count=1
+        shell: bash
+
+      - name: 竞态检测
+        # -race 需要 cgo 与 C 编译器；GitHub 的 Windows 镜像自带 mingw-w64
+        shell: bash
+        env:
+          CGO_ENABLED: "1"
+        run: go test ./... -race -count=1
+
+      - name: 上传构建产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: LiveRelay-${{ github.sha }}
+          path: build/bin/LiveRelay.exe
+          retention-days: 14
+          if-no-files-found: error
+
+  security:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: go.sum
+
+      - name: 安装 gosec
+        run: go install github.com/securego/gosec/v2/cmd/gosec@latest
+
+      - name: 静态安全扫描
+        # 同样跑在 Windows 上：DPAPI 那部分代码带 //go:build windows，
+        # 在别的平台会被整个跳过，而它恰恰是最该扫的一段
+        # -severity medium：LOW 基本是"未处理 Close() 的返回值"这类噪声
+        shell: bash
+        run: gosec -severity medium -confidence medium -quiet ./...

@@ -40,6 +40,7 @@ func Default() *Config {
 }
 
 func Load(path string) (*Config, error) {
+	// #nosec G304 -- path 由数据根拼常量文件名得到，无外部可控片段
 	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return Default(), nil
@@ -49,6 +50,7 @@ func Load(path string) (*Config, error) {
 	}
 	if c, jerr := parse(data); jerr == nil {
 		return c, nil
+		// #nosec G304 -- 同上，只是换成 .bak 后缀
 	} else if bak, berr := os.ReadFile(path + ".bak"); berr == nil {
 		if c, jerr2 := parse(bak); jerr2 == nil {
 			return c, nil

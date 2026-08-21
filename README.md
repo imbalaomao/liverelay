@@ -28,6 +28,19 @@ Go + Wails v2 + Vue 3，单文件 exe，无需安装运行时。
 2. exe 同级存在 `data/` → 便携模式，一切数据都在这个目录里，删掉即卸载
 3. 否则 → `%APPDATA%\LiveRelay`
 
+## 获取构建产物
+
+正式版本在 [Releases](https://github.com/imbalaomao/liverelay/releases) 里，
+附带 SHA256 校验和。每次推到 `main` 也会由 CI 产出一份开发构建，
+在对应 workflow run 的 Artifacts 里下载（保留 14 天）。
+
+发版方式：打一个 `v` 开头的标签推上去即可，CI 会构建并建一个**草稿** Release，
+确认无误后再手动发布。
+
+```bash
+git tag v0.1.0 && git push origin v0.1.0
+```
+
 ## 从源码构建
 
 ```bash
