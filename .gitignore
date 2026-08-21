@@ -5,30 +5,34 @@
 *.log
 
 # Wails 构建产物（build/ 下的图标与清单需要入库，仅忽略产物目录）
-build/bin/
+/build/bin/
 
 # 前端
 node_modules/
 # dist 由 wails build 生成，但 go:embed 要求目录存在，故保留占位文件
-frontend/dist/*
-!frontend/dist/.gitkeep
+/frontend/dist/*
+!/frontend/dist/.gitkeep
 
-# 运行时数据（便携模式数据根、用户放置的内核二进制）
-data/
-tools/
-recordings/
-logs/
-cache/
+# 运行时数据（便携模式数据根、用户放置的内核二进制）。
+#
+# 这些必须带前导斜杠只匹配仓库根目录下的同名目录：不带斜杠的 `tools/`
+# 会匹配任意层级，把 internal/tools 整个源码包一起挡在仓库外——本地构建
+# 照常通过（文件就在盘上），推上去 CI 才会报 "no matching versions"。
+/data/
+/tools/
+/recordings/
+/logs/
+/cache/
 
 # 编辑器
 .idea/
 .vscode/
 
 # Wails 构建缓存（package.json 的哈希，用于决定是否重跑 npm install）
-frontend/package.json.md5
+/frontend/package.json.md5
 
 # 验证脚本产生的截图
-build/screenshot-*.png
+/build/screenshot-*.png
 
 # 机密：微博 cookie 等凭据放在这里，绝不能进仓库
 .env
@@ -36,4 +40,4 @@ build/screenshot-*.png
 !.env.example
 
 # 过程资料（设计与执行账本），不进公开仓库
-.superpowers/
+/.superpowers/
