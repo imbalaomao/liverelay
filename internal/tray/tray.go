@@ -43,6 +43,18 @@ func OnCloseRequested(closeToTray bool, runningTasks int) Action {
 	return ActionQuit
 }
 
+// OnQuitRequested 决定用户明确要求退出时做什么（托盘菜单的「退出」）。
+//
+// 与 OnCloseRequested 的区别至关重要：Wails 的 runtime.Quit() 内部会再跑一遍
+// OnBeforeClose，若那时仍按"开了收托盘就隐藏"来判断，退出就会被自己的策略
+// 拦下、变成又一次收进托盘——用户看到的就是"退出按钮点了没反应"。
+//
+// 明确的退出意图必须凌驾于收托盘设置之上。这里连"正在推流要不要确认"都不再问：
+// 用户是从托盘菜单里主动选的退出，不是误触窗口的叉。
+func OnQuitRequested(closeToTray bool, runningTasks int) Action {
+	return ActionQuit
+}
+
 // Tooltip 是鼠标悬停在托盘图标上时的提示。
 // 收在托盘里时这是用户唯一能看到的状态，所以要一眼看出在不在推。
 func Tooltip(running int) string {

@@ -247,3 +247,29 @@ func TestStopIsIdempotentAndSafeBeforeStart(t *testing.T) {
 		t.Errorf("Quit 调用了 %d 次，期望 1 次", be.quits)
 	}
 }
+
+// ---------- 明确退出与点关闭按钮的区别 ----------
+
+func TestOnCloseRequestedWhenQuitting(t *testing.T) {
+	// Wails 的 runtime.Quit() 内部会先跑一遍 OnBeforeClose。若那时仍按
+	// "开了收托盘就隐藏"来判断，托盘菜单里的「退出」就会被自己的策略拦下，
+	// 变成又一次收进托盘——用户看到的就是"退出按钮点了没用"。
+	//
+	// 所以"用户已明确要求退出"必须凌驾于收托盘设置之上。
+	cases := []struct {
+		name        string
+		closeToTray bool
+		running     int
+	}{
+		{"开了收托盘且推流中", true, 3},
+		{"开了收托盘且空闲", true, 0},
+		{"没开收托盘且推流中", false, 2},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := OnQuitRequested(c.closeToTray, c.running); got != ActionQuit {
+				t.Errorf("已明确要求退出时应放行，实际 %v", got)
+			}
+		})
+	}
+}

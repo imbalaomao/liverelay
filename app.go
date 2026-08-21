@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"runtime/debug"
+	"sync"
 	"time"
 
 	"github.com/imbalaomao/liverelay/internal/appcore"
@@ -44,6 +45,14 @@ type App struct {
 	power *power.Manager
 
 	stopFlush context.CancelFunc
+
+	// quitting 标记"用户已明确要求退出"。
+	//
+	// Wails 的 runtime.Quit() 内部会再跑一遍 OnBeforeClose；不区分这两种来源的话，
+	// 托盘菜单里的「退出」会被"开了收托盘就隐藏"的策略拦下，变成又一次收进托盘。
+	// 只在主线程/回调里读写，但托盘回调来自另一条 goroutine，所以要加锁。
+	quitMu   sync.Mutex
+	quitting bool
 }
 
 func NewApp(icon []byte) *App { return &App{icon: icon} }
@@ -123,6 +132,10 @@ func (a *App) push(views []appcore.TaskView) {
 
 // beforeClose 接管窗口关闭按钮。返回 true 表示阻止关闭。
 func (a *App) beforeClose(ctx context.Context) bool {
+	if a.isQuitting() {
+		// 这一趟是 Quit() 自己触发的回调，放行，别再拿收托盘策略拦自己
+		return false
+	}
 	closeToTray := true
 	if a.core != nil {
 		closeToTray = a.core.Settings().CloseToTray
@@ -199,21 +212,39 @@ func (a *App) ToggleMaximise() {
 	}
 }
 
-// CloseWindow 走与点关闭按钮相同的策略。
+// CloseWindow 走与点关闭按钮相同的策略。自绘标题栏的叉调用它。
 func (a *App) CloseWindow() {
 	if a.ctx == nil {
 		return
 	}
-	if !a.beforeClose(a.ctx) {
-		wruntime.Quit(a.ctx)
+	if a.beforeClose(a.ctx) {
+		return // 已收进托盘或用户取消了退出
 	}
+	// 策略判定已经放行，置上标志再退——否则 Quit 内部那次 OnBeforeClose
+	// 会重新走一遍判定（还会把"仍在推流"的确认框弹第二次）
+	a.markQuitting()
+	wruntime.Quit(a.ctx)
 }
 
-// Quit 退出应用。
+// Quit 退出应用。托盘菜单的「退出」走这里。
 func (a *App) Quit() {
-	if a.ctx != nil {
-		wruntime.Quit(a.ctx)
+	if a.ctx == nil {
+		return
 	}
+	a.markQuitting()
+	wruntime.Quit(a.ctx)
+}
+
+func (a *App) markQuitting() {
+	a.quitMu.Lock()
+	a.quitting = true
+	a.quitMu.Unlock()
+}
+
+func (a *App) isQuitting() bool {
+	a.quitMu.Lock()
+	defer a.quitMu.Unlock()
+	return a.quitting
 }
 
 // ---------- 环境 ----------
