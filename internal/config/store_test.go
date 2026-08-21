@@ -166,3 +166,37 @@ func TestParseNormalisesProxyType(t *testing.T) {
 		}
 	}
 }
+
+func TestAllToggleDefaultsAreOff(t *testing.T) {
+	// 默认全关：装完就自动改系统行为（阻止休眠、关窗不退）是越权的，
+	// 用户该在自己想要时才打开它们
+	c := Default()
+	cases := []struct {
+		name string
+		on   bool
+	}{
+		{"关闭到托盘", c.Settings.CloseToTray},
+		{"推流时阻止休眠", c.Settings.PreventSleep},
+		{"启用代理", c.Settings.Proxy.Enabled},
+	}
+	for _, tc := range cases {
+		if tc.on {
+			t.Errorf("「%s」默认应为关闭", tc.name)
+		}
+	}
+}
+
+func TestNonToggleDefaultsStayUsable(t *testing.T) {
+	// 开关默认关，但下拉框、数值这类"必须有个值"的项不能跟着一起清空，
+	// 否则设置页会出现选不中任何一项的空下拉框
+	c := Default()
+	if c.Settings.Proxy.Type == "" {
+		t.Error("代理类型不能为空，否则下拉框选不中任何一项")
+	}
+	if c.Settings.MaxConcurrent < 1 {
+		t.Errorf("并发上限 = %d，应是个可用的值", c.Settings.MaxConcurrent)
+	}
+	if c.Settings.ProbeIntervalSec < 30 {
+		t.Errorf("探测间隔 = %d，应在合法区间内", c.Settings.ProbeIntervalSec)
+	}
+}

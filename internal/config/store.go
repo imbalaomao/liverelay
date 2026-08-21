@@ -16,8 +16,10 @@ func Default() *Config {
 	return &Config{
 		Version: 1,
 		Settings: Settings{
-			MaxConcurrent: 4, CloseToTray: true, PreventSleep: true,
-			Theme: "dark", ProbeIntervalSec: 60,
+			// 开关一律默认关闭：装完就擅自改变系统行为（关窗不退出、
+			// 阻止系统休眠）是越权的，该由用户自己决定何时打开
+			MaxConcurrent: 4, ProbeIntervalSec: 60,
+			Theme: "dark",
 			// 类型给个有效默认值：留空会让设置页的下拉框选不中任何一项，
 			// 看起来像是界面坏了
 			Proxy: ProxySettings{Type: "http"},

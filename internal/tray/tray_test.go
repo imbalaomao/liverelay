@@ -4,6 +4,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 // ---------- 关闭行为策略 ----------
@@ -56,6 +57,7 @@ type fakeBackend struct {
 	clicks    map[string]func()
 	quits     int
 	onReady   func()
+	onExit    func()
 	started   int
 	ended     int
 }
@@ -64,10 +66,11 @@ func newFakeBackend() *fakeBackend {
 	return &fakeBackend{clicks: map[string]func(){}}
 }
 
-func (f *fakeBackend) Register(onReady, _ func()) (func(), func()) {
+func (f *fakeBackend) Register(onReady, onExit func()) (func(), func()) {
 	f.mu.Lock()
 	f.registers++
 	f.onReady = onReady
+	f.onExit = onExit
 	f.mu.Unlock()
 	return func() { f.mu.Lock(); f.started++; f.mu.Unlock() },
 		func() { f.mu.Lock(); f.ended++; f.mu.Unlock() }
@@ -104,6 +107,16 @@ func (f *fakeBackend) Quit() {
 	f.mu.Lock()
 	f.quits++
 	f.mu.Unlock()
+}
+
+// fireExit 模拟 systray 真正退出（图标已被移除）时回调 onExit。
+func (f *fakeBackend) fireExit() {
+	f.mu.Lock()
+	fn := f.onExit
+	f.mu.Unlock()
+	if fn != nil {
+		fn()
+	}
 }
 
 func (f *fakeBackend) fireReady() {
@@ -271,5 +284,120 @@ func TestOnCloseRequestedWhenQuitting(t *testing.T) {
 				t.Errorf("已明确要求退出时应放行，实际 %v", got)
 			}
 		})
+	}
+}
+
+// ---------- 退出时确实等到图标被移除 ----------
+
+func TestStopWaitsForIconRemoval(t *testing.T) {
+	// systray.Quit() 只是 PostMessage(WM_CLOSE)，发完就返回。图标真正被移除
+	// 要等消息循环走到 WM_DESTROY 才发生。Stop 若不等，进程就抢先退出了，
+	// 托盘里会留下一个鼠标划过才消失的僵尸图标——这正是用户报的问题。
+	//
+	// systray 在 nid.delete() 之后紧接着调 onExit，所以等到 onExit
+	// 就等于确认了图标已经没了。
+	be := newFakeBackend()
+	s := newWith(be, nil, nil, nil)
+	s.Start()
+	be.fireReady()
+
+	returned := make(chan struct{})
+	go func() { s.Stop(); close(returned) }()
+
+	select {
+	case <-returned:
+		t.Fatal("退出回调还没来，Stop 就返回了——图标来不及移除")
+	case <-time.After(150 * time.Millisecond):
+	}
+
+	be.fireExit()
+	select {
+	case <-returned:
+	case <-time.After(2 * time.Second):
+		t.Fatal("退出回调已触发，Stop 却仍未返回")
+	}
+}
+
+func TestStopGivesUpAfterTimeout(t *testing.T) {
+	// 等是必要的，但不能无限等：systray 若卡住，关机流程不该跟着一起挂死，
+	// 那样用户会看到一个既关不掉也没反应的程序
+	be := newFakeBackend()
+	s := newWith(be, nil, nil, nil)
+	s.stopTimeout = 100 * time.Millisecond
+	s.Start()
+	be.fireReady()
+
+	start := time.Now()
+	s.Stop() // 永不触发 fireExit
+	elapsed := time.Since(start)
+
+	if elapsed > 2*time.Second {
+		t.Errorf("Stop 耗时 %v，超时保护没生效", elapsed)
+	}
+	if elapsed < 50*time.Millisecond {
+		t.Errorf("Stop 只用了 %v，根本没等", elapsed)
+	}
+}
+
+func TestStopStillIdempotentWithWait(t *testing.T) {
+	be := newFakeBackend()
+	s := newWith(be, nil, nil, nil)
+	s.stopTimeout = 100 * time.Millisecond
+	s.Start()
+	be.fireReady()
+	be.fireExit()
+
+	s.Stop()
+	s.Stop() // 第二次应立即返回，不再等一轮超时
+
+	start := time.Now()
+	s.Stop()
+	if d := time.Since(start); d > 50*time.Millisecond {
+		t.Errorf("重复 Stop 耗时 %v，应立即返回", d)
+	}
+
+	be.mu.Lock()
+	defer be.mu.Unlock()
+	if be.quits != 1 {
+		t.Errorf("Quit 调用了 %d 次，期望 1 次", be.quits)
+	}
+}
+
+func TestStopReportsOutcome(t *testing.T) {
+	// 关机时到底是"确认图标已移除"还是"等超时放弃了"，必须能看出来——
+	// 否则僵尸图标这类问题只能靠用户肉眼发现，没有任何日志可查
+	be := newFakeBackend()
+	s := newWith(be, nil, nil, nil)
+	var got []string
+	s.OnLog = func(msg string) { got = append(got, msg) }
+	s.Start()
+	be.fireReady()
+	be.fireExit()
+	s.Stop()
+
+	if len(got) == 0 {
+		t.Fatal("Stop 没有报告任何结果")
+	}
+	if !strings.Contains(got[len(got)-1], "已移除") {
+		t.Errorf("应报告图标已移除，实际 %q", got[len(got)-1])
+	}
+}
+
+func TestStopReportsTimeout(t *testing.T) {
+	be := newFakeBackend()
+	s := newWith(be, nil, nil, nil)
+	s.stopTimeout = 80 * time.Millisecond
+	var got []string
+	s.OnLog = func(msg string) { got = append(got, msg) }
+	s.Start()
+	be.fireReady()
+	s.Stop() // 不触发 fireExit
+
+	if len(got) == 0 {
+		t.Fatal("Stop 没有报告任何结果")
+	}
+	last := got[len(got)-1]
+	if !strings.Contains(last, "超时") {
+		t.Errorf("超时放弃时应如实报告，实际 %q", last)
 	}
 }

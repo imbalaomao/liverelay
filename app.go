@@ -90,6 +90,7 @@ func (a *App) startup(ctx context.Context) {
 	}
 
 	a.tray = tray.New(a.icon, a.ShowWindow, a.Quit)
+	a.tray.OnLog = func(msg string) { runtimeLogError(ctx, "托盘: "+msg) }
 	a.tray.Start()
 
 	fctx, cancel := context.WithCancel(context.Background())
@@ -136,7 +137,9 @@ func (a *App) beforeClose(ctx context.Context) bool {
 		// 这一趟是 Quit() 自己触发的回调，放行，别再拿收托盘策略拦自己
 		return false
 	}
-	closeToTray := true
+	// 取不到配置时按"关"处理，与默认值保持一致——那种情况下程序本就没初始化好，
+	// 让窗口关得掉比留一个收不回来的托盘图标要好
+	closeToTray := false
 	if a.core != nil {
 		closeToTray = a.core.Settings().CloseToTray
 	}

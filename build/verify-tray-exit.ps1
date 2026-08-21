@@ -1,12 +1,14 @@
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()
+. (Join-Path $PSScriptRoot '_trayenv.ps1')
 
 Add-Type @"
 using System;
 using System.Runtime.InteropServices;
-public class TrayExit {
+public class TrayWin {
   [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
   [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hWnd);
+  [DllImport("user32.dll")] public static extern bool IsWindow(IntPtr hWnd);
   [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern IntPtr FindWindowEx(IntPtr parent, IntPtr child, string cls, string title);
   [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint pid);
 }
@@ -26,38 +28,30 @@ $WM_COMMAND = 0x0111
 $MENU_SHOW = 1
 $MENU_QUIT = 3
 
-function Get-TrayWindow($procId) {
-  $cur = [IntPtr]::Zero
-  while ($true) {
-    $cur = [TrayExit]::FindWindowEx([IntPtr]::Zero, $cur, "SystrayClass", $null)
-    if ($cur -eq [IntPtr]::Zero) { return [IntPtr]::Zero }
-    $tpid = 0
-    [void][TrayExit]::GetWindowThreadProcessId($cur, [ref]$tpid)
-    if ($tpid -eq $procId) { return $cur }
-  }
-}
-
-$env:LIVERELAY_DATA = (Resolve-Path '.\data')
+# 这些脚本测的都是「关闭到托盘」开启后的行为，必须显式写进配置：
+# 该项默认已改为关闭，再依赖默认值就测不到想测的东西了
+$dataDir = New-TrayTestData -Name 'tray-exit' -CloseToTray $true
+$env:LIVERELAY_DATA = $dataDir
 $p = Start-Process -FilePath '.\build\bin\LiveRelay.exe' -PassThru
 Start-Sleep -Seconds 12
 Remove-Item Env:\LIVERELAY_DATA
 
 if ($p.HasExited) { Write-Output '失败：进程启动即退出'; exit 1 }
 $hwnd = (Get-Process -Id $p.Id).MainWindowHandle
-$tray = Get-TrayWindow $p.Id
+$tray = Get-OwnedTrayWindow -ProcId $p.Id
 if ($tray -eq [IntPtr]::Zero) { Write-Output '失败：找不到托盘窗口'; Stop-Process -Id $p.Id -Force; exit 1 }
 
 # 收进托盘，复现用户的实际处境
-[void][TrayExit]::PostMessage($hwnd, $WM_CLOSE, [IntPtr]::Zero, [IntPtr]::Zero)
+[void][TrayWin]::PostMessage($hwnd, $WM_CLOSE, [IntPtr]::Zero, [IntPtr]::Zero)
 Start-Sleep -Seconds 3
 if ($p.HasExited) { Write-Output '失败：开了关闭到托盘却退出了'; exit 1 }
 Write-Output '已收进托盘   : True'
 
 # 自校验：点「显示主界面」，窗口该回来。回不来说明菜单 ID 猜错了，
 # 后面点「退出」的结果也就不能作数
-[void][TrayExit]::PostMessage($tray, $WM_COMMAND, [IntPtr]$MENU_SHOW, [IntPtr]::Zero)
+[void][TrayWin]::PostMessage($tray, $WM_COMMAND, [IntPtr]$MENU_SHOW, [IntPtr]::Zero)
 Start-Sleep -Seconds 3
-if (-not [TrayExit]::IsWindowVisible($hwnd)) {
+if (-not [TrayWin]::IsWindowVisible($hwnd)) {
   Write-Output '失败：点「显示主界面」没反应，菜单 ID 可能不对，本次测试无效'
   Stop-Process -Id $p.Id -Force
   exit 1
@@ -65,9 +59,9 @@ if (-not [TrayExit]::IsWindowVisible($hwnd)) {
 Write-Output '菜单可用     : True（「显示主界面」生效）'
 
 # 再收回托盘，然后点「退出」
-[void][TrayExit]::PostMessage($hwnd, $WM_CLOSE, [IntPtr]::Zero, [IntPtr]::Zero)
+[void][TrayWin]::PostMessage($hwnd, $WM_CLOSE, [IntPtr]::Zero, [IntPtr]::Zero)
 Start-Sleep -Seconds 2
-[void][TrayExit]::PostMessage($tray, $WM_COMMAND, [IntPtr]$MENU_QUIT, [IntPtr]::Zero)
+[void][TrayWin]::PostMessage($tray, $WM_COMMAND, [IntPtr]$MENU_QUIT, [IntPtr]::Zero)
 Start-Sleep -Seconds 8
 
 if ($p.HasExited) {

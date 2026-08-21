@@ -1,12 +1,14 @@
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()
+. (Join-Path $PSScriptRoot '_trayenv.ps1')
 
 Add-Type @"
 using System;
 using System.Runtime.InteropServices;
-public class Tray {
+public class TrayWin {
   [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
   [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hWnd);
+  [DllImport("user32.dll")] public static extern bool IsWindow(IntPtr hWnd);
   [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern IntPtr FindWindowEx(IntPtr parent, IntPtr child, string cls, string title);
   [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint pid);
 }
@@ -21,7 +23,10 @@ $WM_CLOSE = 0x0010
 $WM_TRAY = 0x0400 + 1   # WM_USER + 1
 $WM_LBUTTONUP = 0x0202
 
-$env:LIVERELAY_DATA = (Resolve-Path '.\data')
+# 这些脚本测的都是「关闭到托盘」开启后的行为，必须显式写进配置：
+# 该项默认已改为关闭，再依赖默认值就测不到想测的东西了
+$dataDir = New-TrayTestData -Name 'tray-click' -CloseToTray $true
+$env:LIVERELAY_DATA = $dataDir
 $p = Start-Process -FilePath '.\build\bin\LiveRelay.exe' -PassThru
 Start-Sleep -Seconds 12
 Remove-Item Env:\LIVERELAY_DATA
@@ -31,30 +36,22 @@ $hwnd = (Get-Process -Id $p.Id).MainWindowHandle
 if ($hwnd -eq [IntPtr]::Zero) { Write-Output '失败：没有主窗口'; Stop-Process -Id $p.Id -Force; exit 1 }
 
 # 找到本进程名下的 systray 隐藏窗口
-$tray = [IntPtr]::Zero
-$cur = [IntPtr]::Zero
-while ($true) {
-  $cur = [Tray]::FindWindowEx([IntPtr]::Zero, $cur, "SystrayClass", $null)
-  if ($cur -eq [IntPtr]::Zero) { break }
-  $tpid = 0
-  [void][Tray]::GetWindowThreadProcessId($cur, [ref]$tpid)
-  if ($tpid -eq $p.Id) { $tray = $cur; break }
-}
+$tray = Get-OwnedTrayWindow -ProcId $p.Id
 if ($tray -eq [IntPtr]::Zero) { Write-Output '失败：找不到托盘窗口'; Stop-Process -Id $p.Id -Force; exit 1 }
 Write-Output "托盘窗口     : 已找到"
 
 # 1) 关闭主窗口，应收进托盘
-[void][Tray]::PostMessage($hwnd, $WM_CLOSE, [IntPtr]::Zero, [IntPtr]::Zero)
+[void][TrayWin]::PostMessage($hwnd, $WM_CLOSE, [IntPtr]::Zero, [IntPtr]::Zero)
 Start-Sleep -Seconds 3
 if ($p.HasExited) { Write-Output '失败：开了关闭到托盘却退出了'; exit 1 }
-$hidden = -not [Tray]::IsWindowVisible($hwnd)
+$hidden = -not [TrayWin]::IsWindowVisible($hwnd)
 Write-Output "关闭后已隐藏 : $hidden"
 if (-not $hidden) { Write-Output '失败：窗口没有隐藏'; Stop-Process -Id $p.Id -Force; exit 1 }
 
 # 2) 模拟左键点击托盘图标，主窗口应重新出现
-[void][Tray]::PostMessage($tray, $WM_TRAY, [IntPtr]::Zero, [IntPtr]$WM_LBUTTONUP)
+[void][TrayWin]::PostMessage($tray, $WM_TRAY, [IntPtr]::Zero, [IntPtr]$WM_LBUTTONUP)
 Start-Sleep -Seconds 3
-$shown = [Tray]::IsWindowVisible($hwnd)
+$shown = [TrayWin]::IsWindowVisible($hwnd)
 Write-Output "点击图标后可见: $shown"
 
 Stop-Process -Id $p.Id -Force

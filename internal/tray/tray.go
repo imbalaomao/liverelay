@@ -4,6 +4,7 @@ package tray
 import (
 	"fmt"
 	"sync"
+	"time"
 )
 
 // Action 是点击窗口关闭按钮后该采取的动作。
@@ -76,12 +77,25 @@ type backend interface {
 	Quit()
 }
 
+// defaultStopTimeout 是等待托盘退出的上限。
+// 等是必要的（见 Stop），但不能无限等：systray 万一卡住，关机流程不该跟着挂死。
+const defaultStopTimeout = 3 * time.Second
+
 // Service 管理托盘图标的生命周期。
 type Service struct {
+	// OnLog 用于报告关机时图标是否真的被移除。
+	// 僵尸图标只有用户肉眼能发现，没有这条日志就无从排查。
+	OnLog func(string)
+
 	be     backend
 	icon   []byte
 	onShow func()
 	onQuit func()
+
+	// stopTimeout 可覆盖，测试用。
+	stopTimeout time.Duration
+	// exited 在 systray 真正退出（图标已移除）时关闭。
+	exited chan struct{}
 
 	mu      sync.Mutex
 	started bool
@@ -97,7 +111,11 @@ func New(icon []byte, onShow, onQuit func()) *Service {
 }
 
 func newWith(be backend, icon []byte, onShow, onQuit func()) *Service {
-	return &Service{be: be, icon: icon, onShow: onShow, onQuit: onQuit}
+	return &Service{
+		be: be, icon: icon, onShow: onShow, onQuit: onQuit,
+		stopTimeout: defaultStopTimeout,
+		exited:      make(chan struct{}),
+	}
 }
 
 // Start 注册托盘图标。重复调用是空操作——注册两次会在托盘里留下两个图标。
@@ -110,7 +128,7 @@ func (s *Service) Start() {
 	s.started = true
 	s.mu.Unlock()
 
-	start, end := s.be.Register(s.onReady, func() {})
+	start, end := s.be.Register(s.onReady, s.onExited)
 	s.mu.Lock()
 	s.end = end
 	s.mu.Unlock()
@@ -133,6 +151,17 @@ func (s *Service) onReady() {
 	s.mu.Unlock()
 	if tip != "" {
 		s.be.SetTooltip(tip)
+	}
+}
+
+// onExited 由 systray 在图标移除后回调。用 sync.Once 的语义关一次通道即可。
+func (s *Service) onExited() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	select {
+	case <-s.exited:
+	default:
+		close(s.exited)
 	}
 }
 
@@ -161,7 +190,12 @@ func (s *Service) SetStatus(running int) {
 	}
 }
 
-// Stop 移除托盘图标。可重复调用，也可以在 Start 之前调用。
+// Stop 移除托盘图标并等它真的消失。可重复调用，也可以在 Start 之前调用。
+//
+// 必须等：systray.Quit() 只是 PostMessage(WM_CLOSE)，发完就返回，图标要等
+// 消息循环走到 WM_DESTROY 才被 Shell_NotifyIcon(NIM_DELETE) 移除。不等的话
+// 进程会抢先退出，托盘里留下一个鼠标划过才消失的僵尸图标。
+// systray 在删除图标后紧接着回调 onExit，等到它就等于确认图标已经没了。
 func (s *Service) Stop() {
 	s.mu.Lock()
 	if s.stopped || !s.started {
@@ -171,10 +205,28 @@ func (s *Service) Stop() {
 	}
 	s.stopped = true
 	end := s.end
+	timeout := s.stopTimeout
 	s.mu.Unlock()
 
 	s.be.Quit()
 	if end != nil {
 		end()
+	}
+
+	if timeout <= 0 {
+		timeout = defaultStopTimeout
+	}
+	select {
+	case <-s.exited:
+		s.logf("托盘图标已移除")
+	case <-time.After(timeout):
+		// 等不到就放弃：残留一个图标，总好过程序卡在关机流程里关不掉
+		s.logf("等待托盘退出超时（%v），图标可能残留至鼠标划过托盘区", timeout)
+	}
+}
+
+func (s *Service) logf(format string, args ...any) {
+	if s.OnLog != nil {
+		s.OnLog(fmt.Sprintf(format, args...))
 	}
 }
