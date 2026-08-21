@@ -17,7 +17,6 @@ permissions:
   contents: read
 
 env:
-  GO_VERSION: "1.26"
   NODE_VERSION: "24"
   WAILS_VERSION: v2.15.0
 
@@ -33,7 +32,9 @@ jobs:
 
       - uses: actions/setup-go@v7
         with:
-          go-version: ${{ env.GO_VERSION }}
+          # 直接读 go.mod，不手写版本号：写 "1.26" 会解析成该系列的任意补丁版，
+          # 一旦落在低于 go.mod 要求的版本上，构建会以 GOTOOLCHAIN=local 直接失败
+          go-version-file: go.mod
           cache-dependency-path: go.sum
 
       - uses: actions/setup-node@v7
@@ -47,7 +48,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/go/bin/wails.exe
-          key: wails-${{ env.WAILS_VERSION }}-go${{ env.GO_VERSION }}
+          key: wails-${{ env.WAILS_VERSION }}-${{ hashFiles('go.mod') }}
 
       - name: 安装 wails CLI
         if: steps.cache-wails.outputs.cache-hit != 'true'
@@ -98,7 +99,9 @@ jobs:
 
       - uses: actions/setup-go@v7
         with:
-          go-version: ${{ env.GO_VERSION }}
+          # 直接读 go.mod，不手写版本号：写 "1.26" 会解析成该系列的任意补丁版，
+          # 一旦落在低于 go.mod 要求的版本上，构建会以 GOTOOLCHAIN=local 直接失败
+          go-version-file: go.mod
           cache-dependency-path: go.sum
 
       - name: 安装 gosec
