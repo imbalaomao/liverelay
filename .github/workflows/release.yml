@@ -62,17 +62,38 @@ jobs:
         working-directory: build/bin
         run: sha256sum LiveRelay.exe > LiveRelay.exe.sha256
 
+      - name: 判定是否预发布
+        id: kind
+        # 两种情况算预发布，不靠人记得手动勾：
+        #   1. 标签带后缀（v0.1.0-prototype / -alpha / -rc.1 之类）
+        #   2. 主版本号为 0 —— 按 semver 约定，0.x 本身就意味着接口随时会变
+        # 判错的代价是不对称的：把预发布标成正式版，会让人当稳定版用。
+        shell: bash
+        run: |
+          v='${{ steps.ver.outputs.value }}'
+          if [[ "$v" == *-* || "$v" == v0.* ]]; then
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: 创建 Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.ver.outputs.value }}
           name: LiveRelay ${{ steps.ver.outputs.value }}
-          draft: true # 先建成草稿，自己看过再发布
+          prerelease: ${{ steps.kind.outputs.prerelease }}
+          # 预发布本身已经写着"别当稳定版用"，不必再加一道草稿闸门；
+          # 正式版才需要人工过目一遍再发
+          draft: ${{ steps.kind.outputs.prerelease == 'false' }}
           generate_release_notes: true
           files: |
             build/bin/LiveRelay.exe
             build/bin/LiveRelay.exe.sha256
           body: |
+            > **原型版本**。功能已跑通，但尚未在目标硬件上验证，也没有经过长期
+            > 挂机考验。可以拿来试用与反馈，不建议用在真要紧的直播上。
+
             ## 使用前须知
 
             - 需要 Windows 10 1809 及以上，并已安装 WebView2 Runtime（Win11 自带）
@@ -86,3 +107,19 @@ jobs:
               删掉即卸载；否则数据落在 `%APPDATA%\LiveRelay`
 
             下载后可用 `LiveRelay.exe.sha256` 核对完整性。
+
+            ## 这个版本验证到什么程度
+
+            - 全仓 420+ 用例，含竞态检测，每次提交由 CI 在 Windows 上跑
+            - 完整推流链路用真实直播源实测打通（抓流内核 → OS 管道 → ffmpeg → RTMP）
+            - 2 路并发推流 30 秒，Go 侧堆峰值 0.8MB
+            - XSS 注入载荷实测以纯文本渲染；gosec 高危项为 0
+
+            ## 已知限制
+
+            - **未在低配机器上验证**：所有资源数据来自开发机，8GB 内存的目标机上
+              需要复测，尤其是 WebView2 的内存占用会随可用内存变化
+            - **未向公开平台真实推流**：只推到过本地接收端，微博 / B 站等平台的
+              实际转推还需要你自己试
+            - 空载内存约 336MB，其中约 300MB 是 WebView2 的固定开销，暂时压不下去
+            - Twitch 在国内网络下直连不通，需要配代理
