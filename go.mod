@@ -4,7 +4,7 @@ go 1.26.6
 
 require (
 	github.com/energye/systray v1.0.3
-	github.com/wailsapp/wails/v2 v2.15.0
+	github.com/wailsapp/wails/v2 v2.16.0
 )
 
 require (
